@@ -314,14 +314,16 @@ jobs:
           # Linux 4.14: test manual hook prerequisites; do not pretend hooks exist.
           kernel/scripts/config --file out/.config -e KSU -e KSU_MANUAL_HOOK
           if ! grep -q 'ksu_handle_sys_reboot' kernel/kernel/reboot.c; then
-            echo 'Manual hook missing: collect Samsung hook insertion contexts; do not build a nonfunctional kernel.' | tee reports/manual-hook-assessment.txt
+            echo 'Manual hook integration incomplete; collecting full context for a reviewed patch.' | tee reports/manual-hook-assessment.txt
             for file in kernel/reboot.c fs/exec.c fs/open.c fs/read_write.c fs/stat.c fs/namespace.c; do
               if [[ -f "kernel/$file" ]]; then
                 echo "===== $file =====" >> reports/manual-hook-assessment.txt
-                grep -nE -C 5 'SYSCALL_DEFINE|do_execve|do_faccessat|vfs_read|vfs_stat|do_umount|kernel_restart' "kernel/$file" | head -n 180 >> reports/manual-hook-assessment.txt || true
+                grep -nE -C 8 'SYSCALL_DEFINE|do_execve|do_faccessat|vfs_read|vfs_stat|do_umount|kernel_restart' "kernel/$file" >> reports/manual-hook-assessment.txt || true
+                mkdir -p "reports/source-context/$(dirname "$file")"
+                cp "kernel/$file" "reports/source-context/$file"
               fi
             done
-            echo 'No hook patch applied; diagnostics only.' >> reports/manual-hook-assessment.txt
+            echo 'NO BUILD: missing verified KernelSU manual hooks. NOT FLASHABLE.' >> reports/manual-hook-assessment.txt
             exit 1
           fi
           make -C kernel O="$GITHUB_WORKSPACE/out" \
