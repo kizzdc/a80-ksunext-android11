@@ -88,6 +88,23 @@ jobs:
             echo "WARNING: SOURCE TARGETS ANDROID 10" >> source-info.txt
           fi
 
+      - name: Fix outdated blk-crypt function prototype in reference tree
+        run: |
+          set -euo pipefail
+          if [[ "$SOURCE_REPO" == 'https://github.com/kkmmee94/android_kernel_sm6150_unified.git' && "$SOURCE_REF" == 'btf7-fire' ]]; then
+            python3 - <<'PY'
+          from pathlib import Path
+          p = Path('kernel/block/blk-crypt.c')
+          original = 'static int blk_crypt_initialize()'
+          replacement = 'static int blk_crypt_initialize(void)'
+          s = p.read_text()
+          if s.count(original) != 1:
+              raise SystemExit('Unexpected blk-crypt.c layout; refusing patch')
+          p.write_text(s.replace(original, replacement, 1))
+          print('Applied prototype-only fix to reference Android 10 source')
+          PY
+          fi
+
       - name: Integrate KernelSU Next legacy (opt-in only)
         if: ${{ inputs.enable_ksu == true }}
         run: |
