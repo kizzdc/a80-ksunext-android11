@@ -43,6 +43,12 @@ jobs:
         run: |
           set -euo pipefail
           {
+            echo '=== Samsung official build instructions ==='
+            cat outer/README_Kernel.txt
+            echo '=== Build kernel Makefile compiler/linker cases ==='
+            sed -n '368,423p' kernel/Makefile
+            sed -n '476,530p' kernel/Makefile
+            sed -n '670,695p' kernel/Makefile
             echo '=== Source package contents ==='
             find outer -maxdepth 2 -type f -printf '%p %s bytes\n' | head -n 50
             echo '=== Main kernel ARM64 toolchain flags ==='
