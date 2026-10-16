@@ -1,0 +1,130 @@
+name: A80 Android 11 Samsung kernel - baseline build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-a80-samsung11.yml'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release holding SM-A805F official Samsung source'
+        type: string
+        required: true
+        default: 'samsung-a80-source'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a80-samsung11-baseline-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    name: Linux 4.14.190 baseline (NOT flashable)
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag || 'samsung-a80-source' }}
+      ARCH: arm64
+      CROSS_COMPILE: aarch64-linux-gnu-
+      CROSS_COMPILE_COMPAT: arm-linux-gnueabi-
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout workflow repository
+        uses: actions/checkout@v4
+
+      - name: Install cross-compiler and kernel dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc bison flex python3 unzip xz-utils \
+            libssl-dev libelf-dev libncurses-dev \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            binutils-aarch64-linux-gnu ccache
+
+      - name: Download official Samsung A80 kernel source
+        run: |
+          set -euo pipefail
+          mkdir -p incoming outer kernel out reports
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'SM-A805F_EUR_RR_Opensource*.zip' --dir incoming
+          mapfile -d '' source_files < <(find incoming -maxdepth 1 -type f \
+            -name 'SM-A805F_EUR_RR_Opensource*.zip' -print0)
+          (( ${#source_files[@]} == 1 )) || {
+            echo "::error::Expected exactly one Samsung source zip asset"
+            exit 1
+          }
+          sha256sum "${source_files[0]}" | tee reports/official-source-sha256.txt
+          unzip -tq "${source_files[0]}" | tee reports/archive-integrity.txt
+          unzip -q "${source_files[0]}" -d outer
+          kernel_tar=$(find outer -maxdepth 3 -type f -iname 'Kernel.tar.gz' -print -quit)
+          test -n "$kernel_tar"
+          echo "Extracting $kernel_tar"
+          tar -xf "$kernel_tar" -C kernel --no-same-owner --no-same-permissions
+          test -f kernel/Makefile
+          test -f kernel/arch/arm64/configs/r1q_eur_open_defconfig
+          grep -Eq '^VERSION[[:space:]]*=[[:space:]]*4[[:space:]]*$' kernel/Makefile
+          grep -Eq '^PATCHLEVEL[[:space:]]*=[[:space:]]*14[[:space:]]*$' kernel/Makefile
+          grep -Eq '^SUBLEVEL[[:space:]]*=[[:space:]]*190[[:space:]]*$' kernel/Makefile
+          {
+            echo 'A805FXXU7DXE1 Samsung official source. Linux 4.14.190.'
+            echo 'This run is only a baseline compile; no KernelSU has been integrated.'
+            echo 'DO NOT FLASH output on the device; boot configuration not validated.'
+          } | tee reports/NOT_FLASHABLE.txt
+
+      - name: Configure Samsung A80 defconfig
+        run: |
+          set -euo pipefail
+          make -C kernel O="$GITHUB_WORKSPACE/out" \
+            CC=aarch64-linux-gnu-gcc HOSTCC=gcc \
+            r1q_eur_open_defconfig 2>&1 | tee reports/configure.log
+          cp out/.config reports/kernel.config
+          grep -E 'CONFIG_(ARCH_SM6150|MACH_R1Q|KPROBES|MODULES)=' out/.config \
+            > reports/relevant-config.txt || true
+
+      - name: Compile original Android 11 kernel (NO KernelSU)
+        run: |
+          set -euo pipefail
+          # Two diagnostics from old source are warnings with newer host GCC.
+          # Preserve all other build errors for investigation.
+          WARNFLAGS='-Wno-error=maybe-uninitialized -Wno-error=misleading-indentation'
+          make -C kernel O="$GITHUB_WORKSPACE/out" \
+            CC=aarch64-linux-gnu-gcc HOSTCC=gcc KCFLAGS="$WARNFLAGS" \
+            -j4 2>&1 | tee reports/build.log
+          find out/arch/arm64/boot -maxdepth 3 -type f \
+            \( -name Image -o -name Image.gz -o -name Image.gz-dtb \) \
+            -printf '%p %s bytes\n' | tee reports/images.txt
+          test -s reports/images.txt
+
+      - name: Collect kernel build results (NOT for flashing)
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          if [[ -d out/arch/arm64/boot ]]; then
+            for name in Image Image.gz Image.gz-dtb; do
+              [[ ! -s "out/arch/arm64/boot/$name" ]] || \
+                cp "out/arch/arm64/boot/$name" output/
+            done
+          fi
+          cp reports/NOT_FLASHABLE.txt output/ 2>/dev/null || true
+          echo '## Galaxy A80 Samsung source baseline test' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Source: A805FXXU7DXE1, kernel 4.14.190.' >> "$GITHUB_STEP_SUMMARY"
+          echo '**NOT flashable. No KernelSU Next included.**' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload logs, defconfig, and test images
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a80-samsung11-baseline-${{ github.run_number }}
+          path: |
+            reports/
+            output/
+          retention-days: 14
+          if-no-files-found: warn
