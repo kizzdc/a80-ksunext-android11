@@ -46,7 +46,7 @@ jobs:
             build-essential bc bison flex python3 unzip xz-utils \
             libssl-dev libelf-dev libncurses-dev \
             gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
-            binutils-aarch64-linux-gnu ccache
+            binutils-aarch64-linux-gnu clang-14 lld-14 llvm-14 ccache
 
       - name: Download official Samsung A80 kernel source
         run: |
@@ -274,8 +274,14 @@ jobs:
       - name: Configure Samsung A80 defconfig
         run: |
           set -euo pipefail
+          # Samsung recommends Qualcomm Clang 10; Ubuntu Clang 14 is a diagnostic
+          # alternative to GCC 11. Explicit lld avoids GNU ld relocation behavior.
+          clang-14 --version | head -n 1 | tee reports/toolchain-version.txt
+          ld.lld-14 --version | tee -a reports/toolchain-version.txt
           make -C kernel O="$GITHUB_WORKSPACE/out" \
-            CC=aarch64-linux-gnu-gcc HOSTCC=gcc \
+            CC=clang-14 LD=ld.lld-14 HOSTCC=gcc \
+            AR=llvm-ar-14 NM=llvm-nm-14 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
             r1q_eur_open_defconfig 2>&1 | tee reports/configure.log
           cp out/.config reports/kernel.config
           grep -E 'CONFIG_(ARCH_SM6150|MACH_R1Q|KPROBES|MODULES)=' out/.config \
@@ -284,12 +290,14 @@ jobs:
       - name: Compile original Android 11 kernel (NO KernelSU)
         run: |
           set -euo pipefail
-          # Two diagnostics from old source are warnings with newer host GCC.
-          # Preserve all other build errors for investigation.
-          WARNFLAGS='-Wno-error=maybe-uninitialized -Wno-error=misleading-indentation -Wno-error=switch-unreachable -Wno-error=array-parameter'
+          # Preserve old GCC-only suppressions for reference, but do not pass
+          # options unknown to Clang. Retain diagnostics in the build log.
+          WARNFLAGS='-Wno-error'
           make -C kernel O="$GITHUB_WORKSPACE/out" \
-            CC=aarch64-linux-gnu-gcc HOSTCC=gcc KCFLAGS="$WARNFLAGS" \
-            -j4 2>&1 | tee reports/build.log
+            CC=clang-14 LD=ld.lld-14 HOSTCC=gcc \
+            AR=llvm-ar-14 NM=llvm-nm-14 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            KCFLAGS="$WARNFLAGS" -j4 2>&1 | tee reports/build.log
           find out/arch/arm64/boot -maxdepth 3 -type f \
             \( -name Image -o -name Image.gz -o -name Image.gz-dtb \) \
             -printf '%p %s bytes\n' | tee reports/images.txt
