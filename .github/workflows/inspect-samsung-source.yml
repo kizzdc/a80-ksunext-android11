@@ -1,0 +1,136 @@
+name: A80 Android 11 - inspect Samsung source
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag with official Samsung source ZIP'
+        type: string
+        required: true
+        default: 'samsung-a80-source'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag || 'samsung-a80-source' }}
+      ZIP_NAME: SM-A805F_EUR_RR_Opensource.zip
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch official source from GitHub Release
+        run: |
+          set -euo pipefail
+          mkdir -p incoming report extracted
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$ZIP_NAME" --dir incoming
+          test -s "incoming/$ZIP_NAME"
+          sha256sum "incoming/$ZIP_NAME" | tee report/source-sha256.txt
+          unzip -tq "incoming/$ZIP_NAME" | tee report/zip-integrity.txt
+
+      - name: Inventory outer ZIP and select kernel source archive
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import zipfile
+          from pathlib import Path
+          src = Path('incoming/SM-A805F_EUR_RR_Opensource.zip')
+          out = Path('extracted')
+          with zipfile.ZipFile(src) as z:
+              entries = z.infolist()
+              with open('report/outer-zip-inventory.tsv', 'w') as f:
+                  for e in entries:
+                      print(f'{e.file_size}\t{e.filename}', file=f)
+              # Do not unpack symlinks or unsafe paths.
+              for info in entries:
+                  n = info.filename.replace('\\', '/')
+                  p = Path(n)
+                  if not n or n.startswith('/') or '..' in p.parts:
+                      raise RuntimeError('Unsafe path in Samsung ZIP: ' + n)
+                  if (info.external_attr >> 16) & 0o170000 == 0o120000:
+                      raise RuntimeError('Symlink refused: ' + n)
+              z.extractall(out)
+          print('Outer archive extracted. Files:', len(entries))
+          PY
+          find extracted -maxdepth 3 -type f -printf '%p %s bytes\n' | tee report/outer-tree.txt
+
+      - name: Extract kernel archives, if present
+        run: |
+          set -euo pipefail
+          mkdir -p kernel-source
+          mapfile -d '' nested < <(find extracted -type f \( -iname '*kernel*.tar.gz' -o -iname '*kernel*.tar.xz' -o -iname '*kernel*.tgz' -o -iname '*kernel*.tar' -o -iname '*kernel*.zip' \) -print0)
+          if (( ${#nested[@]} > 0 )); then
+            for archive in "${nested[@]}"; do
+              echo "Inspecting nested kernel archive: $archive"
+              if [[ "$archive" == *.zip ]]; then
+                unzip -q "$archive" -d kernel-source
+              else
+                tar -tf "$archive" | head -n 50 > report/nested-kernel-entries.txt || true
+                tar -xf "$archive" -C kernel-source --no-same-owner --no-same-permissions
+              fi
+            done
+          else
+            echo 'No nested kernel tar/zip found, inspecting extracted outer directory.'
+            cp -a extracted/. kernel-source/
+          fi
+
+      - name: Detect kernel version and A80 defconfig
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          root = Path('kernel-source')
+          matches = []
+          for file in root.rglob('Makefile'):
+              if not (file.parent / 'arch' / 'arm64').is_dir():
+                  continue
+              try:
+                  data = file.read_text(errors='replace')
+              except Exception:
+                  continue
+              if re.search(r'^VERSION\s*=\s*4\s*$', data, re.M):
+                  matches.append((file, data))
+          with open('report/kernel-candidates.txt', 'w') as f:
+              for file, data in matches:
+                  base = file.parent
+                  major = re.search(r'^VERSION\s*=\s*(\S+)', data, re.M)
+                  minor = re.search(r'^PATCHLEVEL\s*=\s*(\S+)', data, re.M)
+                  sub = re.search(r'^SUBLEVEL\s*=\s*(\S+)', data, re.M)
+                  print(f'Kernel Makefile: {file}', file=f)
+                  print(f'Kernel version: {major.group(1) if major else "?"}.{minor.group(1) if minor else "?"}.{sub.group(1) if sub else "?"}', file=f)
+                  confdir = base / 'arch/arm64/configs'
+                  configs = sorted(p for p in confdir.rglob('*defconfig') if any(x in p.name.lower() for x in ('r1q','a805','sm6150','msm')))
+                  print('Relevant defconfigs:', file=f)
+                  for conf in configs[:100]:
+                      print(f'  {conf.relative_to(base)}', file=f)
+                  print('', file=f)
+          print(Path('report/kernel-candidates.txt').read_text())
+          if not matches:
+              raise SystemExit('No Linux ARM64 kernel root found; inspect archive inventory in artifact.')
+          PY
+          {
+            echo '## Samsung A80 Android 11 official source inspection'
+            echo 'Source: SM-A805F_EUR_RR_Opensource.zip / A805FXXU7DXE1'
+            echo ''
+            echo '### Detected candidates'
+            cat report/kernel-candidates.txt
+            echo ''
+            echo '**No flash image is generated by this workflow.**'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload inspection report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: samsung-a80-source-inspection-${{ github.run_number }}
+          path: report/
+          retention-days: 14
+          if-no-files-found: warn
