@@ -225,6 +225,25 @@ jobs:
           print(Path('reports/ipa-wifi-patch.txt').read_text())
           PY
 
+      - name: Repair missing Samsung memshare function return type
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import stat
+          p = Path('kernel/drivers/soc/qcom/memshare/msm_memshare.c')
+          before = 'extern sec_reserved_mem(void);'
+          after = 'extern int sec_reserved_mem(void);'
+          content = p.read_text()
+          if content.count(before) != 1:
+              raise SystemExit('Unexpected msm_memshare.c source; do not patch blindly')
+          p.chmod(p.stat().st_mode | stat.S_IWUSR)
+          p.write_text(content.replace(before, after, 1))
+          print('Temporary compile-only fix: implicit int -> explicit int.')
+          with open('reports/memshare-patch.txt', 'w') as report:
+              print('%s: %s -> %s' % (p, before, after), file=report)
+          PY
+
       - name: Configure Samsung A80 defconfig
         run: |
           set -euo pipefail
@@ -240,7 +259,7 @@ jobs:
           set -euo pipefail
           # Two diagnostics from old source are warnings with newer host GCC.
           # Preserve all other build errors for investigation.
-          WARNFLAGS='-Wno-error=maybe-uninitialized -Wno-error=misleading-indentation -Wno-error=switch-unreachable'
+          WARNFLAGS='-Wno-error=maybe-uninitialized -Wno-error=misleading-indentation -Wno-error=switch-unreachable -Wno-error=array-parameter'
           make -C kernel O="$GITHUB_WORKSPACE/out" \
             CC=aarch64-linux-gnu-gcc HOSTCC=gcc KCFLAGS="$WARNFLAGS" \
             -j4 2>&1 | tee reports/build.log
