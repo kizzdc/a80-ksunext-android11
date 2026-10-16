@@ -244,6 +244,33 @@ jobs:
               print('%s: %s -> %s' % (p, before, after), file=report)
           PY
 
+      - name: Fix USB PD strict prototypes (Samsung source only)
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import stat
+          p = Path('kernel/drivers/usb/pd/policy_engine.c')
+          substitutions = [
+              ('unsigned int get_pd_max_power()', 'unsigned int get_pd_max_power(void)'),
+              ('int get_pd_cap_count()', 'int get_pd_cap_count(void)'),
+              ('bool get_ps_ready_status()', 'bool get_ps_ready_status(void)'),
+              ('pr_info("%s : phy_driver_data is null!\\n");',
+               'pr_info("%s : phy_driver_data is null!\\n", __func__);'),
+          ]
+          src = p.read_text()
+          with open('reports/usb-pd-patch.txt', 'w') as report:
+              for before, after in substitutions:
+                  num = src.count(before)
+                  if num != 1:
+                      raise SystemExit(f'Unexpected Samsung USB PD source: {before!r} appeared {num} times')
+                  src = src.replace(before, after, 1)
+                  print(f'{before} -> {after}', file=report)
+          p.chmod(p.stat().st_mode | stat.S_IWUSR)
+          p.write_text(src)
+          print(Path('reports/usb-pd-patch.txt').read_text())
+          PY
+
       - name: Configure Samsung A80 defconfig
         run: |
           set -euo pipefail
