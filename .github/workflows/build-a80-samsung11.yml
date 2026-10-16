@@ -290,9 +290,10 @@ jobs:
       - name: Compile original Android 11 kernel (NO KernelSU)
         run: |
           set -euo pipefail
-          # Preserve old GCC-only suppressions for reference, but do not pass
-          # options unknown to Clang. Retain diagnostics in the build log.
-          WARNFLAGS='-Wno-error'
+          # Clang 14 treats Samsung's unused-but-set audio variable as -Werror.
+          # Keep all other warnings classified normally; avoid DWARF5 parsing
+          # spam from GNU objdump by generating DWARF4 with Clang 14.
+          WARNFLAGS='-Wno-error=unused-but-set-variable -gdwarf-4'
           make -C kernel O="$GITHUB_WORKSPACE/out" \
             CC=clang-14 LD=ld.lld-14 HOSTCC=gcc \
             AR=llvm-ar-14 NM=llvm-nm-14 \
