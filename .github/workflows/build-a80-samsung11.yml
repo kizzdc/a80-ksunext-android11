@@ -170,6 +170,45 @@ jobs:
           print(out.read_text())
           PY
 
+      - name: Fix IPA bounded debugfs copy and Wi-Fi API signature
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import stat
+          patches = [
+              (
+                  Path('kernel/drivers/platform/msm/ipa/ipa_v3/ipa_hw_stats.c'),
+                  [
+                      ('if (sizeof(dbg_buff) < count + 1) {',
+                       'if (count >= sizeof(dbg_buff)) {'),
+                      ('missing = copy_from_user(dbg_buff, ubuf, count);',
+                       'missing = copy_from_user(dbg_buff, ubuf, min(count, sizeof(dbg_buff) - 1));'),
+                  ],
+              ),
+              (
+                  Path('kernel/drivers/net/wireless/qualcomm/wcn39xx/qcacld-3.0/core/sme/src/common/sme_api.c'),
+                  [
+                      ('QDF_STATUS sme_create_mon_session(mac_handle_t mac_handle, tSirMacAddr bss_id,',
+                       'QDF_STATUS sme_create_mon_session(mac_handle_t mac_handle, uint8_t *bss_id,'),
+                  ],
+              ),
+          ]
+          with open('reports/ipa-wifi-patch.txt', 'w') as report:
+              for target, edits in patches:
+                  src = target.read_text()
+                  for old, new in edits:
+                      occurrences = src.count(old)
+                      if occurrences != 1:
+                          raise SystemExit('Unexpected source layout in %s: %r count %d' %
+                                           (target, old, occurrences))
+                      src = src.replace(old, new, 1)
+                      print('%s: %s => %s' % (target, old, new), file=report)
+                  target.chmod(target.stat().st_mode | stat.S_IWUSR)
+                  target.write_text(src)
+          print(Path('reports/ipa-wifi-patch.txt').read_text())
+          PY
+
       - name: Configure Samsung A80 defconfig
         run: |
           set -euo pipefail
