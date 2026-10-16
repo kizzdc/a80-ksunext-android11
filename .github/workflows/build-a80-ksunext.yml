@@ -1,0 +1,157 @@
+name: A80 KernelSU Next - experimental build
+
+# The first commit runs a SAFE baseline compile (KernelSU disabled).
+# Experimental Android 10 FireKernel source is NOT certified for stock Android 11.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-a80-ksunext.yml'
+  workflow_dispatch:
+    inputs:
+      source_repo:
+        description: 'Source URL; use Android-11-matched kernel for a real device'
+        required: true
+        type: string
+        default: 'https://github.com/kkmmee94/android_kernel_sm6150_unified.git'
+      source_ref:
+        description: 'Kernel source branch or tag'
+        required: true
+        type: string
+        default: 'btf7-fire'
+      defconfig:
+        description: 'Kernel defconfig path under arch/arm64/configs'
+        required: true
+        type: string
+        default: 'r1q_eur_open_defconfig'
+      enable_ksu:
+        description: 'EXPERIMENTAL: Integrate KernelSU Next legacy (baseline first)'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a80-kernel-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: A80 arm64 test compile - NOT flashable
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    env:
+      SOURCE_REPO: ${{ inputs.source_repo || 'https://github.com/kkmmee94/android_kernel_sm6150_unified.git' }}
+      SOURCE_REF: ${{ inputs.source_ref || 'btf7-fire' }}
+      DEFCONFIG: ${{ inputs.defconfig || 'r1q_eur_open_defconfig' }}
+      ENABLE_KSU: ${{ inputs.enable_ksu || false }}
+      ARCH: arm64
+      CROSS_COMPILE: aarch64-linux-gnu-
+      CROSS_COMPILE_COMPAT: arm-linux-gnueabi-
+      CLANG_TRIPLE: aarch64-linux-gnu-
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout workflow repository
+        uses: actions/checkout@v4
+
+      - name: Install kernel build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc bison flex git curl python3 ccache \
+            libssl-dev libelf-dev libncurses-dev \
+            clang-14 llvm-14 lld-14 \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabi zip xz-utils
+
+      - name: Clone source and mark output as unsafe to flash
+        run: |
+          set -euo pipefail
+          git clone --depth=1 --single-branch --branch "$SOURCE_REF" "$SOURCE_REPO" kernel
+          printf 'Source URL: %s\nSource ref: %s\nCommit: %s\n' \
+            "$SOURCE_REPO" "$SOURCE_REF" "$(git -C kernel rev-parse HEAD)" | tee source-info.txt
+          test -f kernel/Makefile
+          test -f "kernel/arch/arm64/configs/$DEFCONFIG"
+          cat > NOT_FLASHABLE.txt <<'EOF'
+          EXPERIMENTAL BUILD OUTPUT: DO NOT FLASH ON SAMSUNG A80 ANDROID 11.
+          This pipeline only tests whether selected kernel source compiles.
+          A successful build does not prove compatibility with device firmware.
+          No validated boot image, dtb/dtbo or Odin/TWRP package is provided.
+          EOF
+          if grep -Eq 'ANDROID_MAJOR_VERSION[[:space:]]*[:?+]?=[[:space:]]*q([[:space:]]|$)' kernel/Makefile; then
+            echo "::warning::Kernel Makefile targets Android Q (10); stock Android 11 compatibility NOT verified."
+            echo "WARNING: SOURCE TARGETS ANDROID 10" >> source-info.txt
+          fi
+
+      - name: Integrate KernelSU Next legacy (opt-in only)
+        if: ${{ inputs.enable_ksu == true }}
+        run: |
+          set -euo pipefail
+          cd kernel
+          curl --fail --location --silent --show-error \
+            'https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh' \
+            -o /tmp/ksunext-setup.sh
+          bash /tmp/ksunext-setup.sh legacy
+          test -d KernelSU-Next/kernel
+          git -C KernelSU-Next rev-parse HEAD > ../ksu-revision.txt
+
+      - name: Configure kernel
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          make -C kernel O="$GITHUB_WORKSPACE/out" \
+            CC=clang-14 HOSTCC=gcc "$DEFCONFIG" 2>&1 | tee configure.log
+          if [[ "$ENABLE_KSU" == 'true' ]]; then
+            kernel/scripts/config --file out/.config \
+              --enable KPROBES --enable KSU --enable KSU_KPROBE_HOOKS
+            make -C kernel O="$GITHUB_WORKSPACE/out" \
+              CC=clang-14 HOSTCC=gcc olddefconfig 2>&1 | tee -a configure.log
+            for key in KPROBES KSU KSU_KPROBE_HOOKS; do
+              grep -qx "CONFIG_${key}=y" out/.config || {
+                echo "::error::CONFIG_${key} not enabled after olddefconfig"
+                exit 1
+              }
+            done
+          fi
+          cp out/.config built-config.txt
+
+      - name: Compile kernel (test only)
+        run: |
+          set -euo pipefail
+          make -C kernel O="$GITHUB_WORKSPACE/out" \
+            CC=clang-14 HOSTCC=gcc -j"$(nproc)" \
+            2>&1 | tee build.log
+          find out/arch/arm64/boot -maxdepth 2 -type f \
+            \( -name Image -o -name Image.gz -o -name Image.gz-dtb -o -name dtbo.img \) \
+            -print | tee build-outputs.txt
+          test -s build-outputs.txt
+
+      - name: Collect diagnostic artifacts
+        if: always()
+        run: |
+          mkdir -p artifact
+          for f in source-info.txt ksu-revision.txt NOT_FLASHABLE.txt \
+                   built-config.txt configure.log build.log build-outputs.txt; do
+            [[ ! -f "$f" ]] || cp "$f" artifact/
+          done
+          if [[ -d out/arch/arm64/boot ]]; then
+            find out/arch/arm64/boot -maxdepth 2 -type f \
+              \( -name Image -o -name Image.gz -o -name Image.gz-dtb -o -name dtbo.img \) \
+              -exec cp -t artifact/ {} + || true
+          fi
+          echo '## Galaxy A80 experimental kernel compile' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Do **NOT** flash build outputs on Android 11 without source/boot compatibility validation.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload diagnostic logs and build outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a80-kernel-inspection-${{ github.run_number }}
+          path: artifact/
+          retention-days: 14
+          if-no-files-found: warn
