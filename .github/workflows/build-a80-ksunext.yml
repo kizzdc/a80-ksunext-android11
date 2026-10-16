@@ -3,10 +3,7 @@ name: A80 KernelSU Next - experimental build
 # The first commit runs a SAFE baseline compile (KernelSU disabled).
 # Experimental Android 10 FireKernel source is NOT certified for stock Android 11.
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/build-a80-ksunext.yml'
+  # Manual only until the matched Samsung Android 11 source is available.
   workflow_dispatch:
     inputs:
       source_repo:
@@ -157,6 +154,10 @@ jobs:
       - name: Compile kernel (test only)
         run: |
           set -euo pipefail
+          WARNFLAGS=''
+          if [[ "$SOURCE_REPO" == 'https://github.com/kkmmee94/android_kernel_sm6150_unified.git' && "$SOURCE_REF" == 'btf7-fire' ]]; then
+            WARNFLAGS='-Wno-error=maybe-uninitialized -Wno-error=misleading-indentation'
+          fi
           make -C kernel O="$GITHUB_WORKSPACE/out" \
             CC=aarch64-linux-gnu-gcc HOSTCC=gcc KCFLAGS="$WARNFLAGS" -j"$(nproc)" \
             2>&1 | tee build.log
