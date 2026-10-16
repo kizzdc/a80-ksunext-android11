@@ -311,7 +311,13 @@ jobs:
           else
             echo 'CONFIG_MODVERSIONS not enabled; no diagnostic change.' | tee reports/modversions-diagnostic.txt
           fi
-          kernel/scripts/config --file out/.config -e KPROBES -e KSU
+          # Linux 4.14: test manual hook prerequisites; do not pretend hooks exist.
+          kernel/scripts/config --file out/.config -e KSU -e KSU_MANUAL_HOOK
+          if ! grep -q 'ksu_handle_sys_reboot' kernel/kernel/reboot.c; then
+            echo 'Manual hook missing from Samsung reboot.c; integration requires source-level hook patch.' | tee reports/manual-hook-assessment.txt
+            echo 'Do not flash; KernelSU hook integration is incomplete.' >> reports/manual-hook-assessment.txt
+            exit 1
+          fi
           make -C kernel O="$GITHUB_WORKSPACE/out" \
             CC=clang-14 LD=ld.lld-14 HOSTCC=gcc \
             AR=llvm-ar-14 NM=llvm-nm-14 \
