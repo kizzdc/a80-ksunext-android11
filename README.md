@@ -25,6 +25,26 @@ verifiable firmware compatibility. Search https://opensource.samsung.com/
 for `SM-A805F`; download and inspect the applicable Android 11 source.
 Keep an original AP/boot image from the same firmware for future packaging and rollback.
 
+## Upload Samsung Android 11 source for automated inspection
+
+The source archive is **232,111,455 bytes**, too large for a regular GitHub
+repository file (100 MB individual-file limit). Upload it as a **GitHub Release asset**:
+
+1. Go to https://github.com/kizzdc/a80-ksunext-android11/releases/new
+2. Choose a new tag: `samsung-a80-source` (create the tag from `main`).
+3. Release title: `A80 Android 11 Samsung Open Source (A805FXXU7DXE1)`.
+4. Drag and drop `SM-A805F_EUR_RR_Opensource.zip` into **Attach binaries**.
+5. Wait for the 232 MB upload to finish, then select **Publish release**.
+6. GitHub Actions workflow **A80 Android 11 - inspect Samsung source** will
+   start on the release publication. It tests ZIP integrity, extracts
+   kernel archive(s), and records Linux version and A80 defconfig candidates.
+   Logs and reports appear as a workflow artifact. It does **not** flash a device.
+
+If the workflow doesn't auto-run, open Actions > **A80 Android 11 - inspect
+Samsung source** > Run workflow and keep release_tag `samsung-a80-source`.
+We can then use this exact source archive to prepare a stock-baseline build
+before trying KernelSU Next.
+
 ## Samsung source found (owner's screenshot, 2026-10-16)
 
 - Samsung Open Source Release Center result: **SM-A805F**, version **A805FXXU7DXE1**.
