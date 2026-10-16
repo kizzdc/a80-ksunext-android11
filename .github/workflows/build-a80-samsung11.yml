@@ -102,14 +102,28 @@ jobs:
                               print(f'{j+1}: {lines[j]}', file=report)
                           print('---', file=report)
           print(Path('reports/inline-diagnostic.txt').read_text())
-          hdr = Path('kernel/include/linux/mm.h')
-          original = 'extern inline bool need_memory_boosting(struct pglist_data *pgdat);'
-          replacement = 'extern bool need_memory_boosting(struct pglist_data *pgdat);'
-          src = hdr.read_text()
-          if src.count(original) != 1:
-              raise SystemExit('Unexpected Samsung inline declaration; inspect inline-diagnostic.txt')
-          hdr.write_text(src.replace(original, replacement, 1))
-          print('Applied compile-only compatibility change: extern inline -> extern declaration')
+          import stat
+          edits = [
+              (
+                  Path('kernel/include/linux/mm.h'),
+                  'extern inline bool need_memory_boosting(struct pglist_data *pgdat);',
+                  'extern bool need_memory_boosting(struct pglist_data *pgdat);'
+              ),
+              (
+                  Path('kernel/mm/vmscan.c'),
+                  'inline bool need_memory_boosting(struct pglist_data *pgdat)',
+                  'bool need_memory_boosting(struct pglist_data *pgdat)'
+              )
+          ]
+          # Samsung ships read-only source files. Set writable only in ephemeral runner.
+          for path, original, replacement in edits:
+              contents = path.read_text()
+              if contents.count(original) != 1:
+                  raise SystemExit('Unexpected function text in ' + str(path))
+              path.chmod(path.stat().st_mode | stat.S_IWUSR)
+              path.write_text(contents.replace(original, replacement, 1))
+              print('Compile-only inline compatibility adjusted:', path)
+          print('No changes were made to the uploaded official Samsung ZIP')
           PY
 
       - name: Configure Samsung A80 defconfig
