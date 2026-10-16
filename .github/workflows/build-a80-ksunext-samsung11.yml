@@ -275,11 +275,14 @@ jobs:
         run: |
           set -euo pipefail
           cd kernel
+          chmod u+w drivers/Makefile drivers/Kconfig
           curl --fail --location --silent --show-error \
             https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh \
             -o /tmp/ksunext-setup.sh
           bash /tmp/ksunext-setup.sh legacy
           test -d KernelSU-Next/kernel
+          grep -q 'KernelSU-Next' drivers/Makefile
+          grep -q 'KernelSU-Next' drivers/Kconfig
           git -C KernelSU-Next rev-parse HEAD | tee ../reports/ksunext-revision.txt
 
       - name: Configure Samsung A80 defconfig
