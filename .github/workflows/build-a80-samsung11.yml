@@ -126,6 +126,50 @@ jobs:
           print('No changes were made to the uploaded official Samsung ZIP')
           PY
 
+      - name: Fix Samsung driver compile errors in disposable source tree
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import stat
+          edits = [
+              (
+                  'kernel/sound/soc/codecs/tfa9894/tfa9xxx_haptic.c',
+                  [
+                      ('drv->pbq_state == TFA_PBQ_STATE_IDLE;', 'drv->pbq_state = TFA_PBQ_STATE_IDLE;', 1),
+                      ('drv->pbq_state == TFA_PBQ_STATE_TIMEOUT;', 'drv->pbq_state = TFA_PBQ_STATE_TIMEOUT;', 1),
+                      ('pr_info("[VIB] %s: pbq_str_tok: %s\\n", pbq_str_tok);',
+                       'pr_info("[VIB] %s: pbq_str_tok: %s\\n", __func__, pbq_str_tok);', 1),
+                  ]
+              ),
+              (
+                  'kernel/techpack/audio/asoc/msm-pcm-routing-v2.c',
+                  [('static const int const ', 'static const int ', 7)]
+              ),
+              (
+                  'kernel/drivers/input/touchscreen/imagis_40xx/ist40xx_sec.c',
+                  [('char buff[msg_len] = {0, };', 'char buff[128] = {0, };', 1)]
+              )
+          ]
+          out = Path('reports/source-compat-patches.txt')
+          with out.open('w') as report:
+              for filename, replacements in edits:
+                  p = Path(filename)
+                  contents = p.read_text()
+                  if filename.endswith('ist40xx_sec.c') and 'const int msg_len = 128;' not in contents:
+                      raise SystemExit('Unexpected msg_len; inspect Samsung source before changing.')
+                  for old, new, count in replacements:
+                      actual = contents.count(old)
+                      if actual != count:
+                          print(f'UNEXPECTED: {filename} expected {count} copies of {old!r}, found {actual}', file=report)
+                          raise SystemExit('Source mismatch; refusing an unverified edit')
+                      contents = contents.replace(old, new)
+                      print(f'{filename}: {old!r} -> {new!r} (x{count})', file=report)
+                  p.chmod(p.stat().st_mode | stat.S_IWUSR)
+                  p.write_text(contents)
+          print(out.read_text())
+          PY
+
       - name: Configure Samsung A80 defconfig
         run: |
           set -euo pipefail
@@ -141,7 +185,7 @@ jobs:
           set -euo pipefail
           # Two diagnostics from old source are warnings with newer host GCC.
           # Preserve all other build errors for investigation.
-          WARNFLAGS='-Wno-error=maybe-uninitialized -Wno-error=misleading-indentation'
+          WARNFLAGS='-Wno-error=maybe-uninitialized -Wno-error=misleading-indentation -Wno-error=switch-unreachable'
           make -C kernel O="$GITHUB_WORKSPACE/out" \
             CC=aarch64-linux-gnu-gcc HOSTCC=gcc KCFLAGS="$WARNFLAGS" \
             -j4 2>&1 | tee reports/build.log
