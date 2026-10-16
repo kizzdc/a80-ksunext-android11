@@ -283,6 +283,19 @@ jobs:
             AR=llvm-ar-14 NM=llvm-nm-14 \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             r1q_eur_open_defconfig 2>&1 | tee reports/configure.log
+          # Diagnostic-only: Samsung GSI export lacks a valid CRC under Clang 14,
+          # causing R_AARCH64_ABS32 at vmlinux link. Disable symbol CRC versioning
+          # only in the disposable runner config to isolate this toolchain issue.
+          if grep -qx 'CONFIG_MODVERSIONS=y' out/.config; then
+            kernel/scripts/config --file out/.config -d MODVERSIONS
+            make -C kernel O="$GITHUB_WORKSPACE/out" \\
+              CC=clang-14 LD=ld.lld-14 HOSTCC=gcc \\
+              AR=llvm-ar-14 NM=llvm-nm-14 \\
+              CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig
+            echo 'Diagnostic only: disabled CONFIG_MODVERSIONS for Clang 14 baseline linking.' | tee reports/modversions-diagnostic.txt
+          else
+            echo 'CONFIG_MODVERSIONS not enabled; no diagnostic change.' | tee reports/modversions-diagnostic.txt
+          fi
           cp out/.config reports/kernel.config
           grep -E 'CONFIG_(ARCH_SM6150|MACH_R1Q|KPROBES|MODULES)=' out/.config \
             > reports/relevant-config.txt || true
