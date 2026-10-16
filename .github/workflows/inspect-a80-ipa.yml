@@ -1,0 +1,48 @@
+name: A80 Samsung source - inspect IPA copy bug
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-a80-ipa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and unpack Samsung source
+        run: |
+          set -euo pipefail
+          mkdir -p incoming outer kernel reports
+          gh release download samsung-a80-source --repo "$GITHUB_REPOSITORY" \
+            --pattern 'SM-A805F_EUR_RR_Opensource*.zip' --dir incoming
+          mapfile -d '' archives < <(find incoming -maxdepth 1 -name 'SM-A805F_EUR_RR_Opensource*.zip' -print0)
+          test "${#archives[@]}" -eq 1
+          unzip -q "${archives[0]}" -d outer
+          tar -xf outer/Kernel.tar.gz -C kernel --no-same-owner --no-same-permissions
+      - name: Inspect IPA source and Wi-Fi header
+        run: |
+          set -euo pipefail
+          {
+            echo '=== IPA function ==='
+            sed -n '1995,2115p' kernel/drivers/platform/msm/ipa/ipa_v3/ipa_hw_stats.c
+            echo '=== IPA uses of copy_from_user and size ==='
+            grep -n -E 'ipa_debugfs_enable_disable_drop_stats|copy_from_user' kernel/drivers/platform/msm/ipa/ipa_v3/ipa_hw_stats.c | tail -n 32
+            echo '=== Wi-Fi function declaration / definition ==='
+            sed -n '13245,13280p' kernel/drivers/net/wireless/qualcomm/wcn39xx/qcacld-3.0/core/sme/src/common/sme_api.c
+            sed -n '2095,2113p' kernel/drivers/net/wireless/qualcomm/wcn39xx/qcacld-3.0/core/sme/inc/sme_api.h
+          } | tee reports/ipa-source-diagnostic.txt
+      - name: Upload diagnostic source excerpts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a80-ipa-diagnostic-${{ github.run_number }}
+          path: reports/
+          retention-days: 7
