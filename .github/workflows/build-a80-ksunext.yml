@@ -105,6 +105,23 @@ jobs:
           PY
           fi
 
+      - name: Fix old GCC warnings and VLA initializer (reference source only)
+        run: |
+          set -euo pipefail
+          if [[ "$SOURCE_REPO" == 'https://github.com/kkmmee94/android_kernel_sm6150_unified.git' && "$SOURCE_REF" == 'btf7-fire' ]]; then
+            python3 - <<'PY'
+          from pathlib import Path
+          p = Path('kernel/drivers/input/touchscreen/imagis_40xx/ist40xx_sec.c')
+          old = 'char buff[msg_len] = {0, };'
+          new = 'char buff[128] = {0, };'
+          s = p.read_text()
+          if s.count(old) != 1 or 'const int msg_len = 128;' not in s:
+              raise SystemExit('Unexpected touchscreen source; aborting automatic patch')
+          p.write_text(s.replace(old, new, 1))
+          print('Fixed variable-length array initialization (size unchanged: 128)')
+          PY
+          fi
+
       - name: Integrate KernelSU Next legacy (opt-in only)
         if: ${{ inputs.enable_ksu == true }}
         run: |
@@ -141,7 +158,7 @@ jobs:
         run: |
           set -euo pipefail
           make -C kernel O="$GITHUB_WORKSPACE/out" \
-            CC=aarch64-linux-gnu-gcc HOSTCC=gcc -j"$(nproc)" \
+            CC=aarch64-linux-gnu-gcc HOSTCC=gcc KCFLAGS="$WARNFLAGS" -j"$(nproc)" \
             2>&1 | tee build.log
           find out/arch/arm64/boot -maxdepth 2 -type f \
             \( -name Image -o -name Image.gz -o -name Image.gz-dtb -o -name dtbo.img \) \
