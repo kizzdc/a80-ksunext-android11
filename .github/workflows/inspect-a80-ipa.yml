@@ -39,6 +39,23 @@ jobs:
             sed -n '13245,13280p' kernel/drivers/net/wireless/qualcomm/wcn39xx/qcacld-3.0/core/sme/src/common/sme_api.c
             sed -n '2095,2113p' kernel/drivers/net/wireless/qualcomm/wcn39xx/qcacld-3.0/core/sme/inc/sme_api.h
           } | tee reports/ipa-source-diagnostic.txt
+      - name: Inspect ARM64 linker and source toolchain requirements
+        run: |
+          set -euo pipefail
+          {
+            echo '=== Source package contents ==='
+            find outer -maxdepth 2 -type f -printf '%p %s bytes\n' | head -n 50
+            echo '=== Main kernel ARM64 toolchain flags ==='
+            grep -nE '^(CC|LD|AS|KBUILD_(CFLAGS|LDFLAGS)|LDFLAGS(_vmlinux)?|KBUILD_AFLAGS|CLANG|LLVM|GCC|CONFIG_(ARM64|MODULE_REL_CRCS))|(-fpie|-fpic|-mcmodel|-shared|-no-pie|--no-apply-dynamic-relocs|--no-undefined)' kernel/Makefile | head -n 100 || true
+            echo '=== arch/arm64/Makefile ==='
+            sed -n '1,230p' kernel/arch/arm64/Makefile
+            echo '=== linker script GSI exports and special sections ==='
+            grep -R -n -m 12 'bss.rtic\|__crc_gsi_write_channel_scratch\|gsi_write_channel_scratch' kernel/arch/arm64/kernel/vmlinux.lds.S kernel/drivers/platform/msm/gsi kernel/security/selinux kernel/include/asm-generic/vmlinux.lds.h | head -n 50 || true
+            echo '=== source build instructions ==='
+            find outer kernel -maxdepth 2 -type f \( -iname '*readme*' -o -iname '*build*.sh' \) | head -n 60
+            echo '=== Toolchain installed / expected hints ==='
+            grep -R -n -m 2 -iE 'clang|aarch64-linux-gnu-gcc|linaro|gcc.*4\.9|GCC.*version' kernel/build* kernel/README* outer/README* 2>/dev/null | head -n 80 || true
+          } | tee reports/arm64-toolchain-diagnostic.txt
       - name: Upload diagnostic source excerpts
         if: always()
         uses: actions/upload-artifact@v4
