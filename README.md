@@ -25,9 +25,17 @@ verifiable firmware compatibility. Search https://opensource.samsung.com/
 for `SM-A805F`; download and inspect the applicable Android 11 source.
 Keep an original AP/boot image from the same firmware for future packaging and rollback.
 
+## Samsung source found (owner's screenshot, 2026-10-16)
+
+- Samsung Open Source Release Center result: **SM-A805F**, version **A805FXXU7DXE1**.
+- Listed package name: `SM-A805F_EUR_RR_Opensource.zip`.
+- Samsung's release notes confirm **A805FXXU7DXE1 is Android 11**; it is newer than the owner's **A805FXXU7DWE3**.
+- **Not yet downloaded or inspected:** exact kernel patch level, defconfig, compiler requirements, stock Android 11 boot image compatibility.
+- Wait for the source archive and compare with the owner's Android 11 firmware before making a flash image.
+
 ## Running the diagnostic workflow
 
-Open **Actions → A80 KernelSU Next - experimental build**.
+Open **Actions → A80 KernelSU Next - experimental build**. Runs are now manual-only until matched Android 11 source is integrated.
 On first test leave `enable_ksu=false`.
 Inspect the logs and the artifact `a80-kernel-inspection-<run>`.
 A successful compilation **does not** mean a bootable or flashable kernel.
