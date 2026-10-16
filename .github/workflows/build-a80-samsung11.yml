@@ -197,6 +197,22 @@ jobs:
           with open('reports/ipa-wifi-patch.txt', 'w') as report:
               for target, edits in patches:
                   src = target.read_text()
+                  if target.name == 'ipa_hw_stats.c':
+                      # Scope to the function containing the single unbounded copy.
+                      copy_call = 'missing = copy_from_user(dbg_buff, ubuf, count);'
+                      guard = 'if (sizeof(dbg_buff) < count + 1) {'
+                      if src.count(copy_call) != 1:
+                          raise SystemExit('IPA call missing or duplicated')
+                      call_pos = src.index(copy_call)
+                      guard_pos = src.rfind(guard, 0, call_pos)
+                      if guard_pos < 0 or call_pos - guard_pos > 500:
+                          raise SystemExit('No matching IPA guard near unsafe copy')
+                      src = (src[:guard_pos] +
+                             'if (count >= sizeof(dbg_buff)) {' +
+                             src[guard_pos + len(guard):])
+                      print('%s: fixed only the guard immediately preceding the affected copy' %
+                            target, file=report)
+                      edits = edits[1:] # guard already patched with precise location
                   for old, new in edits:
                       occurrences = src.count(old)
                       if occurrences != 1:
