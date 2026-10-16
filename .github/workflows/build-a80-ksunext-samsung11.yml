@@ -1,0 +1,362 @@
+name: A80 Android 11 KernelSU Next - integration test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-a80-ksunext-samsung11.yml'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release holding SM-A805F official Samsung source'
+        type: string
+        required: true
+        default: 'samsung-a80-source'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a80-samsung11-ksunext-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    name: Linux 4.14.190 KernelSU Next integration (NOT flashable)
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag || 'samsung-a80-source' }}
+      ARCH: arm64
+      CROSS_COMPILE: aarch64-linux-gnu-
+      CROSS_COMPILE_COMPAT: arm-linux-gnueabi-
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout workflow repository
+        uses: actions/checkout@v4
+
+      - name: Install cross-compiler and kernel dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc bison flex python3 unzip xz-utils \
+            libssl-dev libelf-dev libncurses-dev \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            binutils-aarch64-linux-gnu clang-14 lld-14 llvm-14 ccache
+
+      - name: Download official Samsung A80 kernel source
+        run: |
+          set -euo pipefail
+          mkdir -p incoming outer kernel out reports
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'SM-A805F_EUR_RR_Opensource*.zip' --dir incoming
+          mapfile -d '' source_files < <(find incoming -maxdepth 1 -type f \
+            -name 'SM-A805F_EUR_RR_Opensource*.zip' -print0)
+          (( ${#source_files[@]} == 1 )) || {
+            echo "::error::Expected exactly one Samsung source zip asset"
+            exit 1
+          }
+          sha256sum "${source_files[0]}" | tee reports/official-source-sha256.txt
+          unzip -tq "${source_files[0]}" | tee reports/archive-integrity.txt
+          unzip -q "${source_files[0]}" -d outer
+          kernel_tar=$(find outer -maxdepth 3 -type f -iname 'Kernel.tar.gz' -print -quit)
+          test -n "$kernel_tar"
+          echo "Extracting $kernel_tar"
+          tar -xf "$kernel_tar" -C kernel --no-same-owner --no-same-permissions
+          test -f kernel/Makefile
+          test -f kernel/arch/arm64/configs/r1q_eur_open_defconfig
+          grep -Eq '^VERSION[[:space:]]*=[[:space:]]*4[[:space:]]*$' kernel/Makefile
+          grep -Eq '^PATCHLEVEL[[:space:]]*=[[:space:]]*14[[:space:]]*$' kernel/Makefile
+          grep -Eq '^SUBLEVEL[[:space:]]*=[[:space:]]*190[[:space:]]*$' kernel/Makefile
+          {
+            echo 'A805FXXU7DXE1 Samsung official source. Linux 4.14.190.'
+            echo 'This run is only a baseline compile; no KernelSU has been integrated.'
+            echo 'DO NOT FLASH output on the device; boot configuration not validated.'
+          } | tee reports/NOT_FLASHABLE.txt
+
+      - name: Diagnose and repair Samsung inline declaration (GCC compatibility)
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          name = 'need_memory_boosting'
+          paths = [
+              Path('kernel/include/linux/mm.h'),
+              Path('kernel/mm/page_alloc.c'),
+              Path('kernel/mm/vmscan.c'),
+          ]
+          with open('reports/inline-diagnostic.txt', 'w') as report:
+              for p in paths:
+                  print(f'=== {p} ===', file=report)
+                  if not p.exists():
+                      print('MISSING', file=report)
+                      continue
+                  lines = p.read_text(errors='replace').splitlines()
+                  for i, line in enumerate(lines):
+                      if name in line:
+                          for j in range(max(0, i-3), min(len(lines), i+6)):
+                              print(f'{j+1}: {lines[j]}', file=report)
+                          print('---', file=report)
+          print(Path('reports/inline-diagnostic.txt').read_text())
+          import stat
+          edits = [
+              (
+                  Path('kernel/include/linux/mm.h'),
+                  'extern inline bool need_memory_boosting(struct pglist_data *pgdat);',
+                  'extern bool need_memory_boosting(struct pglist_data *pgdat);'
+              ),
+              (
+                  Path('kernel/mm/vmscan.c'),
+                  'inline bool need_memory_boosting(struct pglist_data *pgdat)',
+                  'bool need_memory_boosting(struct pglist_data *pgdat)'
+              )
+          ]
+          # Samsung ships read-only source files. Set writable only in ephemeral runner.
+          for path, original, replacement in edits:
+              contents = path.read_text()
+              if contents.count(original) != 1:
+                  raise SystemExit('Unexpected function text in ' + str(path))
+              path.chmod(path.stat().st_mode | stat.S_IWUSR)
+              path.write_text(contents.replace(original, replacement, 1))
+              print('Compile-only inline compatibility adjusted:', path)
+          print('No changes were made to the uploaded official Samsung ZIP')
+          PY
+
+      - name: Fix Samsung driver compile errors in disposable source tree
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import stat
+          edits = [
+              (
+                  'kernel/sound/soc/codecs/tfa9894/tfa9xxx_haptic.c',
+                  [
+                      ('drv->pbq_state == TFA_PBQ_STATE_IDLE;', 'drv->pbq_state = TFA_PBQ_STATE_IDLE;', 1),
+                      ('drv->pbq_state == TFA_PBQ_STATE_TIMEOUT;', 'drv->pbq_state = TFA_PBQ_STATE_TIMEOUT;', 1),
+                      ('pr_info("[VIB] %s: pbq_str_tok: %s\\n", pbq_str_tok);',
+                       'pr_info("[VIB] %s: pbq_str_tok: %s\\n", __func__, pbq_str_tok);', 1),
+                  ]
+              ),
+              (
+                  'kernel/techpack/audio/asoc/msm-pcm-routing-v2.c',
+                  [('static const int const ', 'static const int ', 7)]
+              ),
+              (
+                  'kernel/drivers/input/touchscreen/imagis_40xx/ist40xx_sec.c',
+                  [('char buff[msg_len] = {0, };', 'char buff[128] = {0, };', 1)]
+              )
+          ]
+          out = Path('reports/source-compat-patches.txt')
+          with out.open('w') as report:
+              for filename, replacements in edits:
+                  p = Path(filename)
+                  contents = p.read_text()
+                  if filename.endswith('ist40xx_sec.c') and 'const int msg_len = 128;' not in contents:
+                      raise SystemExit('Unexpected msg_len; inspect Samsung source before changing.')
+                  for old, new, count in replacements:
+                      actual = contents.count(old)
+                      if actual != count:
+                          print(f'UNEXPECTED: {filename} expected {count} copies of {old!r}, found {actual}', file=report)
+                          raise SystemExit('Source mismatch; refusing an unverified edit')
+                      contents = contents.replace(old, new)
+                      print(f'{filename}: {old!r} -> {new!r} (x{count})', file=report)
+                  p.chmod(p.stat().st_mode | stat.S_IWUSR)
+                  p.write_text(contents)
+          print(out.read_text())
+          PY
+
+      - name: Fix IPA bounded debugfs copy and Wi-Fi API signature
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import stat
+          patches = [
+              (
+                  Path('kernel/drivers/platform/msm/ipa/ipa_v3/ipa_hw_stats.c'),
+                  [
+                      ('if (sizeof(dbg_buff) < count + 1) {',
+                       'if (count >= sizeof(dbg_buff)) {'),
+                      ('missing = copy_from_user(dbg_buff, ubuf, count);',
+                       'missing = copy_from_user(dbg_buff, ubuf, min(count, sizeof(dbg_buff) - 1));'),
+                  ],
+              ),
+              (
+                  Path('kernel/drivers/net/wireless/qualcomm/wcn39xx/qcacld-3.0/core/sme/src/common/sme_api.c'),
+                  [
+                      ('QDF_STATUS sme_create_mon_session(mac_handle_t mac_handle, tSirMacAddr bss_id,',
+                       'QDF_STATUS sme_create_mon_session(mac_handle_t mac_handle, uint8_t *bss_id,'),
+                  ],
+              ),
+          ]
+          with open('reports/ipa-wifi-patch.txt', 'w') as report:
+              for target, edits in patches:
+                  src = target.read_text()
+                  if target.name == 'ipa_hw_stats.c':
+                      # Scope to the function containing the single unbounded copy.
+                      copy_call = 'missing = copy_from_user(dbg_buff, ubuf, count);'
+                      guard = 'if (sizeof(dbg_buff) < count + 1) {'
+                      if src.count(copy_call) != 1:
+                          raise SystemExit('IPA call missing or duplicated')
+                      call_pos = src.index(copy_call)
+                      guard_pos = src.rfind(guard, 0, call_pos)
+                      if guard_pos < 0 or call_pos - guard_pos > 500:
+                          raise SystemExit('No matching IPA guard near unsafe copy')
+                      src = (src[:guard_pos] +
+                             'if (count >= sizeof(dbg_buff)) {' +
+                             src[guard_pos + len(guard):])
+                      print('%s: fixed only the guard immediately preceding the affected copy' %
+                            target, file=report)
+                      edits = edits[1:] # guard already patched with precise location
+                  for old, new in edits:
+                      occurrences = src.count(old)
+                      if occurrences != 1:
+                          raise SystemExit('Unexpected source layout in %s: %r count %d' %
+                                           (target, old, occurrences))
+                      src = src.replace(old, new, 1)
+                      print('%s: %s => %s' % (target, old, new), file=report)
+                  target.chmod(target.stat().st_mode | stat.S_IWUSR)
+                  target.write_text(src)
+          print(Path('reports/ipa-wifi-patch.txt').read_text())
+          PY
+
+      - name: Repair missing Samsung memshare function return type
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import stat
+          p = Path('kernel/drivers/soc/qcom/memshare/msm_memshare.c')
+          before = 'extern sec_reserved_mem(void);'
+          after = 'extern int sec_reserved_mem(void);'
+          content = p.read_text()
+          if content.count(before) != 1:
+              raise SystemExit('Unexpected msm_memshare.c source; do not patch blindly')
+          p.chmod(p.stat().st_mode | stat.S_IWUSR)
+          p.write_text(content.replace(before, after, 1))
+          print('Temporary compile-only fix: implicit int -> explicit int.')
+          with open('reports/memshare-patch.txt', 'w') as report:
+              print('%s: %s -> %s' % (p, before, after), file=report)
+          PY
+
+      - name: Fix USB PD strict prototypes (Samsung source only)
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import stat
+          p = Path('kernel/drivers/usb/pd/policy_engine.c')
+          substitutions = [
+              ('unsigned int get_pd_max_power()', 'unsigned int get_pd_max_power(void)'),
+              ('int get_pd_cap_count()', 'int get_pd_cap_count(void)'),
+              ('bool get_ps_ready_status()', 'bool get_ps_ready_status(void)'),
+              ('pr_info("%s : phy_driver_data is null!\\n");',
+               'pr_info("%s : phy_driver_data is null!\\n", __func__);'),
+          ]
+          src = p.read_text()
+          with open('reports/usb-pd-patch.txt', 'w') as report:
+              for before, after in substitutions:
+                  num = src.count(before)
+                  if num != 1:
+                      raise SystemExit(f'Unexpected Samsung USB PD source: {before!r} appeared {num} times')
+                  src = src.replace(before, after, 1)
+                  print(f'{before} -> {after}', file=report)
+          p.chmod(p.stat().st_mode | stat.S_IWUSR)
+          p.write_text(src)
+          print(Path('reports/usb-pd-patch.txt').read_text())
+          PY
+
+      - name: Integrate KernelSU Next in disposable Samsung source
+        run: |
+          set -euo pipefail
+          cd kernel
+          curl --fail --location --silent --show-error \
+            https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh \
+            -o /tmp/ksunext-setup.sh
+          bash /tmp/ksunext-setup.sh legacy
+          test -d KernelSU-Next/kernel
+          git -C KernelSU-Next rev-parse HEAD | tee ../reports/ksunext-revision.txt
+
+      - name: Configure Samsung A80 defconfig
+        run: |
+          set -euo pipefail
+          # Samsung recommends Qualcomm Clang 10; Ubuntu Clang 14 is a diagnostic
+          # alternative to GCC 11. Explicit lld avoids GNU ld relocation behavior.
+          clang-14 --version | head -n 1 | tee reports/toolchain-version.txt
+          ld.lld-14 --version | tee -a reports/toolchain-version.txt
+          make -C kernel O="$GITHUB_WORKSPACE/out" \
+            CC=clang-14 LD=ld.lld-14 HOSTCC=gcc \
+            AR=llvm-ar-14 NM=llvm-nm-14 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            r1q_eur_open_defconfig 2>&1 | tee reports/configure.log
+          # Diagnostic-only: Samsung GSI export lacks a valid CRC under Clang 14,
+          # causing R_AARCH64_ABS32 at vmlinux link. Disable symbol CRC versioning
+          # only in the disposable runner config to isolate this toolchain issue.
+          if grep -qx 'CONFIG_MODVERSIONS=y' out/.config; then
+            kernel/scripts/config --file out/.config -d MODVERSIONS
+            make -C kernel O="$GITHUB_WORKSPACE/out" \
+              CC=clang-14 LD=ld.lld-14 HOSTCC=gcc \
+              AR=llvm-ar-14 NM=llvm-nm-14 \
+              CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig
+            echo 'Diagnostic only: disabled CONFIG_MODVERSIONS for Clang 14 baseline linking.' | tee reports/modversions-diagnostic.txt
+          else
+            echo 'CONFIG_MODVERSIONS not enabled; no diagnostic change.' | tee reports/modversions-diagnostic.txt
+          fi
+          kernel/scripts/config --file out/.config -e KPROBES -e KSU
+          make -C kernel O="$GITHUB_WORKSPACE/out" \
+            CC=clang-14 LD=ld.lld-14 HOSTCC=gcc \
+            AR=llvm-ar-14 NM=llvm-nm-14 \
+            CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig
+          grep -qx 'CONFIG_KSU=y' out/.config || { echo "::error::KernelSU Next KSU config unavailable"; exit 1; }
+          cp out/.config reports/kernel.config
+          grep -E 'CONFIG_(ARCH_SM6150|MACH_R1Q|KPROBES|MODULES)=' out/.config \
+            > reports/relevant-config.txt || true
+
+      - name: Compile Android 11 KernelSU Next (experimental)
+        run: |
+          set -euo pipefail
+          # Clang 14 treats Samsung's unused-but-set audio variable as -Werror.
+          # Keep all other warnings classified normally; avoid DWARF5 parsing
+          # spam from GNU objdump by generating DWARF4 with Clang 14.
+          WARNFLAGS='-Wno-error=unused-but-set-variable -gdwarf-4'
+          make -C kernel O="$GITHUB_WORKSPACE/out" \
+            CC=clang-14 LD=ld.lld-14 HOSTCC=gcc \
+            AR=llvm-ar-14 NM=llvm-nm-14 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            KCFLAGS="$WARNFLAGS" -j4 2>&1 | tee reports/build.log
+          find out/arch/arm64/boot -maxdepth 3 -type f \
+            \( -name Image -o -name Image.gz -o -name Image.gz-dtb \) \
+            -printf '%p %s bytes\n' | tee reports/images.txt
+          test -s reports/images.txt
+
+      - name: Collect kernel build results (NOT for flashing)
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          if [[ -d out/arch/arm64/boot ]]; then
+            for name in Image Image.gz Image.gz-dtb; do
+              [[ ! -s "out/arch/arm64/boot/$name" ]] || \
+                cp "out/arch/arm64/boot/$name" output/
+            done
+          fi
+          cp reports/NOT_FLASHABLE.txt output/ 2>/dev/null || true
+          echo '## Galaxy A80 Samsung source baseline test' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Source: A805FXXU7DXE1, kernel 4.14.190.' >> "$GITHUB_STEP_SUMMARY"
+          echo '**NOT flashable. KernelSU Next experimental integration; NOT validated.**' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload logs, defconfig, and test images
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a80-samsung11-ksunext-${{ github.run_number }}
+          path: |
+            reports/
+            output/
+          retention-days: 14
+          if-no-files-found: warn
