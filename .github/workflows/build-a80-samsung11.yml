@@ -288,9 +288,9 @@ jobs:
           # only in the disposable runner config to isolate this toolchain issue.
           if grep -qx 'CONFIG_MODVERSIONS=y' out/.config; then
             kernel/scripts/config --file out/.config -d MODVERSIONS
-            make -C kernel O="$GITHUB_WORKSPACE/out" \\
-              CC=clang-14 LD=ld.lld-14 HOSTCC=gcc \\
-              AR=llvm-ar-14 NM=llvm-nm-14 \\
+            make -C kernel O="$GITHUB_WORKSPACE/out" \
+              CC=clang-14 LD=ld.lld-14 HOSTCC=gcc \
+              AR=llvm-ar-14 NM=llvm-nm-14 \
               CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig
             echo 'Diagnostic only: disabled CONFIG_MODVERSIONS for Clang 14 baseline linking.' | tee reports/modversions-diagnostic.txt
           else
