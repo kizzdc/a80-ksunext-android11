@@ -2,6 +2,11 @@ name: A80 Android 11 - inspect Samsung source
 on:
   release:
     types: [published]
+  # Allow a safe inspection rerun after workflow fixes, even if release is already published.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-samsung-source.yml'
   workflow_dispatch:
     inputs:
       release_tag:
@@ -30,7 +35,20 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p incoming report extracted
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$ZIP_NAME" --dir incoming
+          # GitHub's uploaded asset has a .1 suffix; accept Samsung's source name
+          # with or without the browser's duplicate-download suffix.
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'SM-A805F_EUR_RR_Opensource*.zip' --dir incoming
+          mapfile -d '' sources < <(find incoming -maxdepth 1 -type f -name 'SM-A805F_EUR_RR_Opensource*.zip' -print0)
+          if (( ${#sources[@]} != 1 )); then
+            printf 'Expected exactly one source ZIP, found %d\n' "${#sources[@]}" >&2
+            printf '%s\n' "${sources[@]}" >&2
+            exit 1
+          fi
+          echo "Asset uploaded to release: ${sources[0]}" | tee report/asset-name.txt
+          if [[ "${sources[0]}" != "incoming/$ZIP_NAME" ]]; then
+            mv -- "${sources[0]}" "incoming/$ZIP_NAME"
+          fi
           test -s "incoming/$ZIP_NAME"
           sha256sum "incoming/$ZIP_NAME" | tee report/source-sha256.txt
           unzip -tq "incoming/$ZIP_NAME" | tee report/zip-integrity.txt
