@@ -105,12 +105,12 @@ jobs:
           set -euo pipefail
           mkdir -p out
           make -C kernel O="$GITHUB_WORKSPACE/out" \
-            CC=clang-14 HOSTCC=gcc "$DEFCONFIG" 2>&1 | tee configure.log
+            CC=aarch64-linux-gnu-gcc HOSTCC=gcc "$DEFCONFIG" 2>&1 | tee configure.log
           if [[ "$ENABLE_KSU" == 'true' ]]; then
             kernel/scripts/config --file out/.config \
               --enable KPROBES --enable KSU --enable KSU_KPROBE_HOOKS
             make -C kernel O="$GITHUB_WORKSPACE/out" \
-              CC=clang-14 HOSTCC=gcc olddefconfig 2>&1 | tee -a configure.log
+              CC=aarch64-linux-gnu-gcc HOSTCC=gcc olddefconfig 2>&1 | tee -a configure.log
             for key in KPROBES KSU KSU_KPROBE_HOOKS; do
               grep -qx "CONFIG_${key}=y" out/.config || {
                 echo "::error::CONFIG_${key} not enabled after olddefconfig"
@@ -124,7 +124,7 @@ jobs:
         run: |
           set -euo pipefail
           make -C kernel O="$GITHUB_WORKSPACE/out" \
-            CC=clang-14 HOSTCC=gcc -j"$(nproc)" \
+            CC=aarch64-linux-gnu-gcc HOSTCC=gcc -j"$(nproc)" \
             2>&1 | tee build.log
           find out/arch/arm64/boot -maxdepth 2 -type f \
             \( -name Image -o -name Image.gz -o -name Image.gz-dtb -o -name dtbo.img \) \
