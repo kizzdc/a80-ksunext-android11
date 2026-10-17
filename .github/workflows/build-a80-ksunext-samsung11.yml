@@ -440,7 +440,7 @@ jobs:
               CC=clang-14 LD=ld.lld-14 HOSTCC=gcc \
               AR=llvm-ar-14 NM=llvm-nm-14 \
               CLANG_TRIPLE=aarch64-linux-gnu- \
-              -j2 security/selinux/flask.h security/selinux/av_permissions.h > reports/selinux-header-make.log 2>&1
+              -j2 security/selinux/ > reports/selinux-header-make.log 2>&1
             selinux_prep_rc=$?
             set -e
             echo "SELinux header generation exit code: $selinux_prep_rc" | tee -a reports/selinux-header-prep.txt
