@@ -515,6 +515,16 @@ jobs:
               echo "--- $file ---" | tee -a reports/hook-mode-audit.txt
               grep -n -E 'do_execveat_common|SYSCALL_DEFINE[0-9]\((execve|execveat|setresuid|umount)|commit_creds|set_current_cred' "$file" | head -n 65 | tee -a reports/hook-mode-audit.txt || true
             done
+            echo '===== KernelSU exec hook function signature and call chain =====' | tee reports/manual-hook-insertion-context.txt
+            sed -n '15,65p' kernel/KernelSU-Next/kernel/core/init.c | tee -a reports/manual-hook-insertion-context.txt
+            sed -n '20,55p' kernel/KernelSU-Next/kernel/runtime/ksud.h | tee -a reports/manual-hook-insertion-context.txt
+            sed -n '1,65p' kernel/KernelSU-Next/kernel/hook/setuid_hook.h | tee -a reports/manual-hook-insertion-context.txt
+            echo '===== Samsung do_execveat_common =====' | tee -a reports/manual-hook-insertion-context.txt
+            sed -n '1830,1905p' kernel/fs/exec.c | tee -a reports/manual-hook-insertion-context.txt
+            echo '===== Samsung setresuid =====' | tee -a reports/manual-hook-insertion-context.txt
+            sed -n '595,670p' kernel/kernel/sys.c | tee -a reports/manual-hook-insertion-context.txt
+            echo '===== Samsung umount =====' | tee -a reports/manual-hook-insertion-context.txt
+            sed -n '2170,2225p' kernel/fs/namespace.c | tee -a reports/manual-hook-insertion-context.txt
             echo 'Diagnostic only: KernelSU objects may still fail due to incomplete manual hooks; not a full link.' >> reports/NOT_FLASHABLE.txt
             echo 'Only reboot object tested; all other manual hooks remain unverified. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
             exit 1
