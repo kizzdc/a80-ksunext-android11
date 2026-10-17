@@ -558,6 +558,36 @@ jobs:
           echo "Temporary execveat hook compile exit code: $exec_hook_rc" | tee -a reports/exec-hook-compile.txt
           tail -n 45 reports/exec-hook-compile-build.log | tee -a reports/exec-hook-compile.txt
           echo 'Temporary execveat hook is compile-only and NOT boot-validated. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
+          echo '===== Inspect linked execveat hook reference =====' | tee reports/exec-hook-symbol-check.txt
+          llvm-nm-14 -u out/fs/exec.o | grep 'ksu_handle_execveat' | tee -a reports/exec-hook-symbol-check.txt || true
+          echo '===== Attempt temporary setresuid hook compile (runner only) =====' | tee reports/setresuid-hook-compile.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, stat
+          p = Path('kernel/kernel/sys.c')
+          src = p.read_text()
+          needle = 'SYSCALL_DEFINE3(setresuid, uid_t, ruid, uid_t, euid, uid_t, suid)'
+          assert src.count(needle) == 1
+          proto = '#ifdef CONFIG_KSU_MANUAL_HOOK\nextern int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid);\n#endif\n'
+          src = src.replace(needle, proto + needle, 1)
+          begin = src.index(needle)
+          end = src.index('\n}', begin)
+          chunk = src[begin:end]
+          anchor = '\treturn commit_creds(new);'
+          assert chunk.count(anchor) == 1
+          replacement = '#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_setresuid(from_kuid_munged(current_user_ns(), old->uid), from_kuid_munged(current_user_ns(), new->uid));\n#endif\n\treturn commit_creds(new);'
+          chunk = chunk.replace(anchor, replacement, 1)
+          os.chmod(p, p.stat().st_mode | stat.S_IWUSR)
+          p.write_text(src[:begin] + chunk + src[end:])
+          PY
+          set +e
+          make -C kernel O="$GITHUB_WORKSPACE/out" CC=clang-14 LD=ld.lld-14 HOSTCC=gcc AR=llvm-ar-14 NM=llvm-nm-14 CLANG_TRIPLE=aarch64-linux-gnu- kernel/sys.o > reports/setresuid-hook-compile-build.log 2>&1
+          setuid_rc=$?
+          set -e
+          echo "Temporary setresuid hook compile exit code: $setuid_rc" | tee -a reports/setresuid-hook-compile.txt
+          tail -n 45 reports/setresuid-hook-compile-build.log | tee -a reports/setresuid-hook-compile.txt
+          echo 'Setresuid hook experimental only, no full kernel link or boot validation. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
+
             echo 'Diagnostic only: KernelSU objects may still fail due to incomplete manual hooks; not a full link.' >> reports/NOT_FLASHABLE.txt
             echo 'Only reboot object tested; all other manual hooks remain unverified. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
             exit 1
