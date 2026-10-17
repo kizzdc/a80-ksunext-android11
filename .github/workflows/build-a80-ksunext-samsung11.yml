@@ -595,6 +595,10 @@ jobs:
           full_rc=$?
           set -e
           echo "Full kernel Image build exit code: $full_rc" | tee -a reports/full-kernel-attempt.txt
+          echo '===== Full kernel build errors with context =====' | tee -a reports/full-kernel-attempt.txt
+          grep -n -B 8 -A 12 -E '(^|[[:space:]])(error:|fatal error:)|undefined reference|No rule to make target|Error [0-9]+|FAILED:|ld.lld: error:' reports/full-kernel-build.log | head -n 240 | tee -a reports/full-kernel-attempt.txt || true
+          echo '===== First fatal/error occurrences =====' | tee -a reports/full-kernel-attempt.txt
+          grep -n -m 35 -E 'error:|fatal error:|undefined reference|No rule to make target|Error [0-9]+|ld.lld: error:' reports/full-kernel-build.log | tee -a reports/full-kernel-attempt.txt || true
           echo '===== Full kernel build last 100 lines =====' | tee -a reports/full-kernel-attempt.txt
           tail -n 100 reports/full-kernel-build.log | tee -a reports/full-kernel-attempt.txt
           echo 'Full kernel test is experimental; remaining hooks and boot are unverified. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
