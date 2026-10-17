@@ -334,6 +334,15 @@ jobs:
                 cp "$file" "reports/ksu-hook-context/${file#kernel/KernelSU-Next/kernel/}"
               fi
             done
+            echo '===== Manual hook ABI contract =====' > reports/manual-hook-abi-contract.txt
+            for item in 'core/init.c:ksu_handle_execveat' 'feature/sucompat.c:ksu_handle_faccessat' 'feature/sucompat.c:ksu_handle_stat' 'supercall/supercall.c:ksu_handle_sys_reboot' 'runtime/ksud_integration.c:ksu_handle_sys_read'; do
+              file="${item%%:*}"
+              symbol="${item#*:}"
+              echo "===== $symbol ($file) =====" >> reports/manual-hook-abi-contract.txt
+              grep -n -A 16 -B 4 "$symbol(" "kernel/KernelSU-Next/kernel/$file" | head -n 55 >> reports/manual-hook-abi-contract.txt || true
+            done
+            echo '===== Samsung call site contract =====' >> reports/manual-hook-abi-contract.txt
+            grep -n -A 14 -B 3 -E 'SYSCALL_DEFINE4\\(reboot|SYSCALL_DEFINE3\\(faccessat|do_execveat_common\\(' kernel/kernel/reboot.c kernel/fs/open.c kernel/fs/exec.c | head -n 180 >> reports/manual-hook-abi-contract.txt || true
             echo 'Manual hook ABI audit only; kernel build intentionally blocked.' >> reports/manual-hook-assessment.txt
             echo 'NO BUILD: missing verified KernelSU manual hooks. NOT FLASHABLE.' >> reports/manual-hook-assessment.txt
             exit 1
