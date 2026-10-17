@@ -387,8 +387,31 @@ jobs:
               'Other hooks not installed; no build and NOT FLASHABLE.\\n')
           print('Reboot hook dry-run completed')
           PY
-            echo 'Manual hook ABI audit only; kernel build intentionally blocked.' >> reports/manual-hook-assessment.txt
-            echo 'NO BUILD: missing verified KernelSU manual hooks. NOT FLASHABLE.' >> reports/manual-hook-assessment.txt
+            echo '===== Compile patched reboot object (isolated diagnostic) =====' | tee reports/reboot-compile.txt
+            make -C kernel O="$GITHUB_WORKSPACE/out" \
+              CC=clang-14 LD=ld.lld-14 HOSTCC=gcc \
+              AR=llvm-ar-14 NM=llvm-nm-14 \
+              CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig 2>&1 | tee -a reports/reboot-compile.txt
+            grep -qx 'CONFIG_KSU=y' out/.config || {
+              echo 'CONFIG_KSU is not enabled; aborting object check' | tee -a reports/reboot-compile.txt
+              exit 1
+            }
+            grep -qx 'CONFIG_KSU_MANUAL_HOOK=y' out/.config || {
+              echo 'CONFIG_KSU_MANUAL_HOOK is not enabled' | tee -a reports/reboot-compile.txt
+              exit 1
+            }
+            set +e
+            make -C kernel O="$GITHUB_WORKSPACE/out" \
+              CC=clang-14 LD=ld.lld-14 HOSTCC=gcc \
+              AR=llvm-ar-14 NM=llvm-nm-14 \
+              CLANG_TRIPLE=aarch64-linux-gnu- \
+              KCFLAGS='-Wno-error=unused-but-set-variable -gdwarf-4' \
+              -j2 kernel/reboot.o > reports/reboot-object-build.log 2>&1
+            reboot_rc=$?
+            set -e
+            tail -n 80 reports/reboot-object-build.log | tee -a reports/reboot-compile.txt
+            echo "Reboot object compile exit code: $reboot_rc" | tee -a reports/reboot-compile.txt
+            echo 'Only reboot object tested; all other manual hooks remain unverified. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
             exit 1
           fi
           make -C kernel O="$GITHUB_WORKSPACE/out" \
