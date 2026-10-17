@@ -349,14 +349,15 @@ jobs:
           import stat
           p = Path('kernel/kernel/reboot.c')
           src = p.read_text()
-          signature = 'SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,\\n\\t\\tvoid __user *, arg)'
-          start = src.find(signature)
-          if start < 0 or src.count(signature) != 1:
-              raise SystemExit('Reboot signature mismatch: no patch applied')
-          anchor = '\\t/* We only trust the superuser with rebooting the system. */'
-          idx = src.find(anchor, start)
-          if idx < 0 or idx-start > 800:
+          import re
+          matches = list(re.finditer(r'SYSCALL_DEFINE4\s*\(\s*reboot\s*,', src))
+          if len(matches) != 1:
+              raise SystemExit(f'Expected one reboot syscall, found {len(matches)}')
+          start = matches[0].start()
+          anchor_match = re.search(r'/\*\s*We only trust the superuser with rebooting the system\.\s*\*/', src[start:start+1600])
+          if not anchor_match:
               raise SystemExit('Reboot capability-check anchor mismatch')
+          idx = start + anchor_match.start()
           declaration = '''#ifdef CONFIG_KSU_MANUAL_HOOK
           extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
                                void __user **arg);
