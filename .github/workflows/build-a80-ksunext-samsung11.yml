@@ -525,6 +525,13 @@ jobs:
             sed -n '595,670p' kernel/kernel/sys.c | tee -a reports/manual-hook-insertion-context.txt
             echo '===== Samsung umount =====' | tee -a reports/manual-hook-insertion-context.txt
             sed -n '2170,2225p' kernel/fs/namespace.c | tee -a reports/manual-hook-insertion-context.txt
+            echo '===== Validate proposed exec hook ABI without modifying Samsung source =====' | tee reports/exec-hook-abi.txt
+            grep -n -A 22 -B 4 'int ksu_handle_execveat(' kernel/KernelSU-Next/kernel/core/init.c | tee -a reports/exec-hook-abi.txt || true
+            grep -n -A 16 -B 3 'static int do_execveat_common(' kernel/fs/exec.c | tee -a reports/exec-hook-abi.txt || true
+            echo '===== Full setresuid commit path =====' | tee -a reports/exec-hook-abi.txt
+            sed -n '625,665p' kernel/kernel/sys.c | tee -a reports/exec-hook-abi.txt
+            echo '===== Current KSU hook mode constraints =====' | tee -a reports/exec-hook-abi.txt
+            grep -R -n -E 'CONFIG_KSU_MANUAL_HOOK|ksu_handle_execveat\(' kernel/KernelSU-Next/kernel/Kbuild kernel/KernelSU-Next/kernel/core/init.c kernel/KernelSU-Next/kernel/Kconfig | tee -a reports/exec-hook-abi.txt || true
             echo 'Diagnostic only: KernelSU objects may still fail due to incomplete manual hooks; not a full link.' >> reports/NOT_FLASHABLE.txt
             echo 'Only reboot object tested; all other manual hooks remain unverified. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
             exit 1
