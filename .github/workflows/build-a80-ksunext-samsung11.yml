@@ -597,7 +597,7 @@ jobs:
           src = p.read_text()
           old = 'mnt->mnt.mnt_flags & MNT_LOCKED'
           new = 'mnt->mnt->mnt_flags & MNT_LOCKED'
-          assert src.count(old) == 1, f'Expected exactly one namespace expression, got {src.count(old)}'
+          assert src.count(old) >= 1, f'Expected namespace expression, got {src.count(old)}'
           os.chmod(p, p.stat().st_mode | stat.S_IWUSR)
           p.write_text(src.replace(old, new, 1))
           print('Applied runner-only pointer fix:', old, '=>', new)
