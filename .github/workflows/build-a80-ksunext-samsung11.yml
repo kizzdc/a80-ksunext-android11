@@ -532,30 +532,30 @@ jobs:
             sed -n '625,665p' kernel/kernel/sys.c | tee -a reports/exec-hook-abi.txt
             echo '===== Current KSU hook mode constraints =====' | tee -a reports/exec-hook-abi.txt
             grep -R -n -E 'CONFIG_KSU_MANUAL_HOOK|ksu_handle_execveat\(' kernel/KernelSU-Next/kernel/Kbuild kernel/KernelSU-Next/kernel/core/init.c kernel/KernelSU-Next/kernel/Kconfig | tee -a reports/exec-hook-abi.txt || true
-            echo '===== Test temporary execveat manual hook compile (runner only) =====' | tee reports/exec-hook-compile.txt
-            python3 - <<'PY' 
-            from pathlib import Path
-            p = Path('kernel/fs/exec.c')
-            src = p.read_text()
-            needle = 'static int do_execveat_common(int fd, struct filename *filename,'
-            assert src.count(needle) == 1, 'unexpected execveat function signature'
-            prototype = 'extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);\n'
-            src = src.replace(needle, '#ifdef CONFIG_KSU_MANUAL_HOOK\n' + prototype + '#endif\n' + needle, 1)
-            start = src.index(needle)
-            tail = src[start:]
-            guard = '\tif (IS_ERR(filename))\n\t\treturn PTR_ERR(filename);\n'
-            assert tail.count(guard) == 1, 'unexpected execveat error guard'
-            call = '\n#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);\n#endif\n'
-            tail = tail.replace(guard, guard + call, 1)
-            p.write_text(src[:start] + tail)
-            PY
-            set +e
-            make -C kernel O="$GITHUB_WORKSPACE/out" CC=clang-14 LD=ld.lld-14 HOSTCC=gcc AR=llvm-ar-14 NM=llvm-nm-14 CLANG_TRIPLE=aarch64-linux-gnu- fs/exec.o > reports/exec-hook-compile-build.log 2>&1
-            exec_hook_rc=$?
-            set -e
-            echo "Temporary execveat hook compile exit code: $exec_hook_rc" | tee -a reports/exec-hook-compile.txt
-            tail -n 45 reports/exec-hook-compile-build.log | tee -a reports/exec-hook-compile.txt
-            echo 'Temporary execveat hook is compile-only and NOT boot-validated. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
+          echo '===== Test temporary execveat manual hook compile (runner only) =====' | tee reports/exec-hook-compile.txt
+          python3 - <<'PY' 
+          from pathlib import Path
+          p = Path('kernel/fs/exec.c')
+          src = p.read_text()
+          needle = 'static int do_execveat_common(int fd, struct filename *filename,'
+          assert src.count(needle) == 1, 'unexpected execveat function signature'
+          prototype = 'extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);\n'
+          src = src.replace(needle, '#ifdef CONFIG_KSU_MANUAL_HOOK\n' + prototype + '#endif\n' + needle, 1)
+          start = src.index(needle)
+          tail = src[start:]
+          guard = '\tif (IS_ERR(filename))\n\t\treturn PTR_ERR(filename);\n'
+          assert tail.count(guard) == 1, 'unexpected execveat error guard'
+          call = '\n#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);\n#endif\n'
+          tail = tail.replace(guard, guard + call, 1)
+          p.write_text(src[:start] + tail)
+          PY
+          set +e
+          make -C kernel O="$GITHUB_WORKSPACE/out" CC=clang-14 LD=ld.lld-14 HOSTCC=gcc AR=llvm-ar-14 NM=llvm-nm-14 CLANG_TRIPLE=aarch64-linux-gnu- fs/exec.o > reports/exec-hook-compile-build.log 2>&1
+          exec_hook_rc=$?
+          set -e
+          echo "Temporary execveat hook compile exit code: $exec_hook_rc" | tee -a reports/exec-hook-compile.txt
+          tail -n 45 reports/exec-hook-compile-build.log | tee -a reports/exec-hook-compile.txt
+          echo 'Temporary execveat hook is compile-only and NOT boot-validated. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
             echo 'Diagnostic only: KernelSU objects may still fail due to incomplete manual hooks; not a full link.' >> reports/NOT_FLASHABLE.txt
             echo 'Only reboot object tested; all other manual hooks remain unverified. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
             exit 1
