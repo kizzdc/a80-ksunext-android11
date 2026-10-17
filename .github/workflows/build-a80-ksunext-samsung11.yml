@@ -327,6 +327,14 @@ jobs:
             grep -R -nE 'ksu_handle_(execveat|faccessat|stat|read|sys_reboot|vfs_read|setuid)' kernel/KernelSU-Next/kernel --include='*.h' --include='*.c' | head -n 220 >> reports/manual-hook-assessment.txt || true
             echo '===== Samsung syscall signatures =====' >> reports/manual-hook-assessment.txt
             grep -nE 'SYSCALL_DEFINE[0-6]\\((execve|execveat|faccessat|read|newfstatat|reboot)|do_execveat_common|do_faccessat' kernel/fs/{exec,open,read_write,stat}.c kernel/kernel/reboot.c >> reports/manual-hook-assessment.txt || true
+            echo '===== Full KernelSU hook function declarations and bodies =====' >> reports/manual-hook-assessment.txt
+            for file in kernel/KernelSU-Next/kernel/core/init.c kernel/KernelSU-Next/kernel/feature/sucompat.c kernel/KernelSU-Next/kernel/runtime/ksud_integration.c kernel/KernelSU-Next/kernel/supercall/supercall.c kernel/KernelSU-Next/kernel/feature/sucompat.h; do
+              if [[ -f "$file" ]]; then
+                mkdir -p "reports/ksu-hook-context/$(dirname "${file#kernel/KernelSU-Next/kernel/}")"
+                cp "$file" "reports/ksu-hook-context/${file#kernel/KernelSU-Next/kernel/}"
+              fi
+            done
+            echo 'Manual hook ABI audit only; kernel build intentionally blocked.' >> reports/manual-hook-assessment.txt
             echo 'NO BUILD: missing verified KernelSU manual hooks. NOT FLASHABLE.' >> reports/manual-hook-assessment.txt
             exit 1
           fi
