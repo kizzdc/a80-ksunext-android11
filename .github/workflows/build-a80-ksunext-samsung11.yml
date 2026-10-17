@@ -597,10 +597,13 @@ jobs:
           src = p.read_text()
           old = 'mnt->mnt.mnt_flags & MNT_LOCKED'
           new = 'mnt->mnt->mnt_flags & MNT_LOCKED'
-          assert src.count(old) >= 1, f'Expected namespace expression, got {src.count(old)}'
+          lines = src.splitlines(keepends=True)
+          target = 2283 - 1
+          assert old in lines[target], f'Expected pointer expression at line 2283: {lines[target]!r}'
+          lines[target] = lines[target].replace(old, new, 1)
           os.chmod(p, p.stat().st_mode | stat.S_IWUSR)
-          p.write_text(src.replace(old, new, 1))
-          print('Applied runner-only pointer fix:', old, '=>', new)
+          p.write_text(''.join(lines))
+          print('Applied runner-only pointer fix at line 2283:', lines[target].strip())
           PY
           echo '===== Try complete kernel compilation and linking with temporary hooks =====' | tee reports/full-kernel-attempt.txt
           set +e
