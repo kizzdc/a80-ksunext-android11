@@ -367,7 +367,9 @@ jobs:
           if 'ksu_handle_sys_reboot' in src:
               raise SystemExit('Reboot hook already exists; refusing duplicate')
           src = src[:start] + declaration + src[start:]
-          idx = src.find(anchor, start+len(declaration))
+          idx = src.find(anchor_match.group(0), start+len(declaration))
+          if idx < 0:
+              raise SystemExit('Reboot anchor vanished after insertion')
           hook = '''#ifdef CONFIG_KSU_MANUAL_HOOK
               /* KernelSU supercall magic, not Linux's reboot magic. */
               if ((unsigned int)magic1 == 0xDEADBEEF) {
