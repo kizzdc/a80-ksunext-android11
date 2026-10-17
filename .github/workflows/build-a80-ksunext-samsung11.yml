@@ -411,6 +411,29 @@ jobs:
             set -e
             tail -n 80 reports/reboot-object-build.log | tee -a reports/reboot-compile.txt
             echo "Reboot object compile exit code: $reboot_rc" | tee -a reports/reboot-compile.txt
+            echo '===== Verify compiled reboot object contains KernelSU call =====' | tee -a reports/reboot-compile.txt
+            if [[ "$reboot_rc" -eq 0 ]]; then
+              llvm-nm-14 out/kernel/reboot.o | grep -E 'ksu_handle_sys_reboot|__arm64_sys_reboot|sys_reboot' | tee reports/reboot-symbols.txt || true
+              if ! llvm-nm-14 -u out/kernel/reboot.o | grep -q 'ksu_handle_sys_reboot'; then
+                echo 'WARNING: compiled reboot.o has no unresolved KernelSU reboot hook reference' | tee -a reports/reboot-compile.txt
+              fi
+            fi
+            echo '===== Compile remaining Samsung hook call-site objects (unmodified) =====' | tee reports/manual-hook-object-audit.txt
+            for target in fs/exec.o fs/open.o fs/read_write.o fs/stat.o fs/namespace.o; do
+              set +e
+              make -C kernel O="$GITHUB_WORKSPACE/out" \
+                CC=clang-14 LD=ld.lld-14 HOSTCC=gcc \
+                AR=llvm-ar-14 NM=llvm-nm-14 \
+                CLANG_TRIPLE=aarch64-linux-gnu- \
+                KCFLAGS='-Wno-error=unused-but-set-variable -gdwarf-4' \
+                -j2 "$target" > "reports/${target//\//-}.log" 2>&1
+              rc=$?
+              set -e
+              echo "$target compile exit code: $rc" | tee -a reports/manual-hook-object-audit.txt
+              if [[ "$rc" -ne 0 ]]; then
+                tail -n 35 "reports/${target//\//-}.log" >> reports/manual-hook-object-audit.txt
+              fi
+            done
             echo 'Only reboot object tested; all other manual hooks remain unverified. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
             exit 1
           fi
