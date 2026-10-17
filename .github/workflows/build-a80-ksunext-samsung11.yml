@@ -617,6 +617,78 @@ jobs:
           grep -n -m 35 -E 'error:|fatal error:|undefined reference|No rule to make target|Error [0-9]+|ld.lld: error:' reports/full-kernel-build.log | tee -a reports/full-kernel-attempt.txt || true
           echo '===== Full kernel build last 100 lines =====' | tee -a reports/full-kernel-attempt.txt
           tail -n 100 reports/full-kernel-build.log | tee -a reports/full-kernel-attempt.txt
+          echo '===== Inspect linked KernelSU Next symbols and generated Image =====' | tee reports/full-link-ksu-audit.txt
+          if [[ "$full_rc" -eq 0 && -s out/arch/arm64/boot/Image && -s out/vmlinux ]]; then
+            ls -lh out/arch/arm64/boot/Image out/vmlinux | tee -a reports/full-link-ksu-audit.txt
+            sha256sum out/arch/arm64/boot/Image | tee -a reports/full-link-ksu-audit.txt
+            echo '===== KernelSU symbols in System.map =====' | tee -a reports/full-link-ksu-audit.txt
+            grep -E ' (ksu_handle_execveat|ksu_handle_setresuid|ksu_handle_umount|ksu_handle_sys_reboot|ksu_lsm_hook_init|ksu_handle_execveat_ksud|ksu_handle_execveat_sucompat)
+
+
+            echo 'Diagnostic only: KernelSU objects may still fail due to incomplete manual hooks; not a full link.' >> reports/NOT_FLASHABLE.txt
+            echo 'Only reboot object tested; all other manual hooks remain unverified. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
+            exit 1
+          fi
+          make -C kernel O="$GITHUB_WORKSPACE/out" \
+            CC=clang-14 LD=ld.lld-14 HOSTCC=gcc \
+            AR=llvm-ar-14 NM=llvm-nm-14 \
+            CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig
+          grep -qx 'CONFIG_KSU=y' out/.config || { echo "::error::KernelSU Next KSU config unavailable"; exit 1; }
+          cp out/.config reports/kernel.config
+          grep -E 'CONFIG_(ARCH_SM6150|MACH_R1Q|KPROBES|MODULES)=' out/.config \
+            > reports/relevant-config.txt || true
+
+      - name: Compile Android 11 KernelSU Next (experimental)
+        run: |
+          set -euo pipefail
+          # Clang 14 treats Samsung's unused-but-set audio variable as -Werror.
+          # Keep all other warnings classified normally; avoid DWARF5 parsing
+          # spam from GNU objdump by generating DWARF4 with Clang 14.
+          WARNFLAGS='-Wno-error=unused-but-set-variable -gdwarf-4'
+          make -C kernel O="$GITHUB_WORKSPACE/out" \
+            CC=clang-14 LD=ld.lld-14 HOSTCC=gcc \
+            AR=llvm-ar-14 NM=llvm-nm-14 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            KCFLAGS="$WARNFLAGS" -j4 2>&1 | tee reports/build.log
+          find out/arch/arm64/boot -maxdepth 3 -type f \
+            \( -name Image -o -name Image.gz -o -name Image.gz-dtb \) \
+            -printf '%p %s bytes\n' | tee reports/images.txt
+          test -s reports/images.txt
+
+      - name: Collect kernel build results (NOT for flashing)
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          if [[ -d out/arch/arm64/boot ]]; then
+            for name in Image Image.gz Image.gz-dtb; do
+              [[ ! -s "out/arch/arm64/boot/$name" ]] || \
+                cp "out/arch/arm64/boot/$name" output/
+            done
+          fi
+          cp reports/NOT_FLASHABLE.txt output/ 2>/dev/null || true
+          echo '## Galaxy A80 Samsung source baseline test' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Source: A805FXXU7DXE1, kernel 4.14.190.' >> "$GITHUB_STEP_SUMMARY"
+          echo '**NOT flashable. KernelSU Next experimental integration; NOT validated.**' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload logs, defconfig, and test images
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a80-samsung11-ksunext-${{ github.run_number }}
+          path: |
+            reports/
+            output/
+          retention-days: 14
+          if-no-files-found: warn
+ out/System.map | tee -a reports/full-link-ksu-audit.txt || true
+            echo '===== KernelSU symbols referenced by hooked Samsung objects =====' | tee -a reports/full-link-ksu-audit.txt
+            llvm-nm-14 -u out/fs/exec.o out/kernel/sys.o | grep -E 'ksu_handle_(execveat|setresuid)' | tee -a reports/full-link-ksu-audit.txt || true
+            echo '===== KernelSU config =====' | tee -a reports/full-link-ksu-audit.txt
+            grep -E '^CONFIG_(KSU|KSU_MANUAL_HOOK|SECURITY_SELINUX)=' out/.config | tee -a reports/full-link-ksu-audit.txt || true
+          else
+            echo 'No successful linked Image to audit.' | tee -a reports/full-link-ksu-audit.txt
+          fi
           echo 'Full kernel test is experimental; remaining hooks and boot are unverified. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
 
 
