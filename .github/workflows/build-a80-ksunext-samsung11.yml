@@ -607,7 +607,7 @@ jobs:
           PY
           echo '===== Try complete kernel compilation and linking with temporary hooks =====' | tee reports/full-kernel-attempt.txt
           set +e
-          timeout 1500 make -C kernel O="$GITHUB_WORKSPACE/out" -j"$(nproc)" CC=clang-14 LD=ld.lld-14 HOSTCC=gcc AR=llvm-ar-14 NM=llvm-nm-14 CLANG_TRIPLE=aarch64-linux-gnu- Image > reports/full-kernel-build.log 2>&1
+          timeout 1500 make -C kernel O="$GITHUB_WORKSPACE/out" -j"$(nproc)" KCFLAGS="-Wno-error=unused-but-set-variable" CC=clang-14 LD=ld.lld-14 HOSTCC=gcc AR=llvm-ar-14 NM=llvm-nm-14 CLANG_TRIPLE=aarch64-linux-gnu- Image > reports/full-kernel-build.log 2>&1
           full_rc=$?
           set -e
           echo "Full kernel Image build exit code: $full_rc" | tee -a reports/full-kernel-attempt.txt
