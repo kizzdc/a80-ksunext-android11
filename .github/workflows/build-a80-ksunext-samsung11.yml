@@ -358,23 +358,23 @@ jobs:
             if idx < 0 or idx-start > 800:
                 raise SystemExit('Reboot capability-check anchor mismatch')
             declaration = '''#ifdef CONFIG_KSU_MANUAL_HOOK
-extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
+            extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
                                  void __user **arg);
-#endif
+            #endif
 
-'''
+            '''
             if 'ksu_handle_sys_reboot' in src:
                 raise SystemExit('Reboot hook already exists; refusing duplicate')
             src = src[:start] + declaration + src[start:]
             idx = src.find(anchor, start+len(declaration))
             hook = '''#ifdef CONFIG_KSU_MANUAL_HOOK
-    /* KernelSU supercall magic, not Linux's reboot magic. */
-    if ((unsigned int)magic1 == 0xDEADBEEF) {
-        ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);
-        return 0;
-    }
-#endif
-'''
+                /* KernelSU supercall magic, not Linux's reboot magic. */
+                if ((unsigned int)magic1 == 0xDEADBEEF) {
+                    ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);
+                    return 0;
+                }
+            #endif
+            '''
             src = src[:idx] + hook + src[idx:]
             p.chmod(p.stat().st_mode | stat.S_IWUSR)
             p.write_text(src)
