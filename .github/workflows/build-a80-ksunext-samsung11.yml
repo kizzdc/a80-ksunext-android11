@@ -434,6 +434,19 @@ jobs:
                 tail -n 35 "reports/${target//\//-}.log" >> reports/manual-hook-object-audit.txt
               fi
             done
+            echo '===== Prepare generated SELinux headers for isolated KSU build =====' | tee reports/selinux-header-prep.txt
+            set +e
+            make -C kernel O="$GITHUB_WORKSPACE/out" \
+              CC=clang-14 LD=ld.lld-14 HOSTCC=gcc \
+              AR=llvm-ar-14 NM=llvm-nm-14 \
+              CLANG_TRIPLE=aarch64-linux-gnu- \
+              -j2 security/selinux/flask.h security/selinux/av_permissions.h > reports/selinux-header-make.log 2>&1
+            selinux_prep_rc=$?
+            set -e
+            echo "SELinux header generation exit code: $selinux_prep_rc" | tee -a reports/selinux-header-prep.txt
+            tail -n 35 reports/selinux-header-make.log | tee -a reports/selinux-header-prep.txt
+            find kernel/security/selinux out/security/selinux -maxdepth 3 \
+              \( -name flask.h -o -name av_permissions.h \) -print 2>/dev/null | tee -a reports/selinux-header-prep.txt || true
             echo '===== KernelSU Next legacy object compilation audit =====' | tee reports/ksu-object-audit.txt
             set +e
             make -C kernel O="$GITHUB_WORKSPACE/out" \
