@@ -459,6 +459,14 @@ jobs:
             set -e
             echo "KernelSU Next objects compile exit code: $ksu_rc" | tee -a reports/ksu-object-audit.txt
             tail -n 100 reports/ksu-object-build.log | tee -a reports/ksu-object-audit.txt
+            echo '===== Inspect KernelSU object linkage and required manual-hook symbols =====' | tee reports/ksu-symbol-audit.txt
+            find out/drivers/kernelsu -name '*.o' -type f | sort > reports/ksu-object-list.txt
+            while IFS= read -r object; do
+              llvm-nm-14 -u "$object" 2>/dev/null | grep -E 'ksu_handle_|ksu_|security_|selinux_' | sed "s|^|$object: |" || true
+            done < reports/ksu-object-list.txt | tee -a reports/ksu-symbol-audit.txt
+            echo '===== Confirm generated SELinux headers =====' >> reports/ksu-symbol-audit.txt
+            test -s out/security/selinux/flask.h && echo 'flask.h exists' >> reports/ksu-symbol-audit.txt
+            test -s out/security/selinux/av_permissions.h && echo 'av_permissions.h exists' >> reports/ksu-symbol-audit.txt
             echo 'Diagnostic only: KernelSU objects may still fail due to incomplete manual hooks; not a full link.' >> reports/NOT_FLASHABLE.txt
             echo 'Only reboot object tested; all other manual hooks remain unverified. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
             exit 1
