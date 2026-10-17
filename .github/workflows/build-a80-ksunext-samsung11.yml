@@ -489,6 +489,12 @@ jobs:
               echo "--- $file $symbol ---" >> reports/ksu-resolution-audit.txt
               grep -n -F -A 12 -B 4 "$symbol" "kernel/$file" | head -n 95 >> reports/ksu-resolution-audit.txt || true
             done
+            echo '===== KernelSU symbol resolution audit results ====='
+            cat reports/ksu-resolution-audit.txt
+            echo '===== KernelSU unresolved symbols (cross-object) ====='
+            cat reports/ksu-undefined-symbols.txt
+            echo '===== Samsung hook insertion context ====='
+            grep -A 110 'Samsung hook site function' reports/ksu-resolution-audit.txt | head -n 220 || true
             echo 'Diagnostic only: KernelSU objects may still fail due to incomplete manual hooks; not a full link.' >> reports/NOT_FLASHABLE.txt
             echo 'Only reboot object tested; all other manual hooks remain unverified. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
             exit 1
