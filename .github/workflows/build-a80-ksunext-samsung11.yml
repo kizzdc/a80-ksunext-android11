@@ -589,6 +589,19 @@ jobs:
           echo 'Setresuid hook experimental only, no full kernel link or boot validation. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
           echo '===== Verify setresuid symbol reference =====' | tee reports/setresuid-hook-symbol-check.txt
           llvm-nm-14 -u out/kernel/sys.o | grep 'ksu_handle_setresuid' | tee -a reports/setresuid-hook-symbol-check.txt || true
+          echo '===== Correct Samsung namespace pointer access in runner only =====' | tee reports/namespace-pointer-fix.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, stat
+          p = Path('kernel/fs/namespace.c')
+          src = p.read_text()
+          old = 'mnt->mnt.mnt_flags & MNT_LOCKED'
+          new = 'mnt->mnt->mnt_flags & MNT_LOCKED'
+          assert src.count(old) == 1, f'Expected exactly one namespace expression, got {src.count(old)}'
+          os.chmod(p, p.stat().st_mode | stat.S_IWUSR)
+          p.write_text(src.replace(old, new, 1))
+          print('Applied runner-only pointer fix:', old, '=>', new)
+          PY
           echo '===== Try complete kernel compilation and linking with temporary hooks =====' | tee reports/full-kernel-attempt.txt
           set +e
           timeout 1500 make -C kernel O="$GITHUB_WORKSPACE/out" -j"$(nproc)" CC=clang-14 LD=ld.lld-14 HOSTCC=gcc AR=llvm-ar-14 NM=llvm-nm-14 CLANG_TRIPLE=aarch64-linux-gnu- Image > reports/full-kernel-build.log 2>&1
