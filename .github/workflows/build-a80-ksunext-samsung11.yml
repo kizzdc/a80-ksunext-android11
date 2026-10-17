@@ -495,6 +495,17 @@ jobs:
             cat reports/ksu-undefined-symbols.txt
             echo '===== Samsung hook insertion context ====='
             grep -A 110 'Samsung hook site function' reports/ksu-resolution-audit.txt | head -n 220 || true
+            echo '===== Verify actual KernelSU manual-hook definitions and call sites =====' | tee reports/manual-hook-gap.txt
+            for symbol in ksu_handle_execveat_ksud ksu_handle_execveat_sucompat ksu_handle_setresuid ksu_handle_umount ksu_handle_sys_reboot; do
+              echo "--- $symbol: definitions in compiled KernelSU objects ---" | tee -a reports/manual-hook-gap.txt
+              while IFS= read -r obj; do
+                llvm-nm-14 --defined-only "$obj" 2>/dev/null | awk -v sym="$symbol" '$NF == sym {print}' | sed "s|^|$obj: |" || true
+              done < reports/ksu-object-list.txt | tee -a reports/manual-hook-gap.txt
+              echo "--- $symbol: call sites in Samsung kernel sources ---" | tee -a reports/manual-hook-gap.txt
+              grep -R -n -F "$symbol" kernel/kernel/reboot.c kernel/fs/exec.c kernel/fs/open.c kernel/fs/read_write.c kernel/fs/stat.c kernel/fs/namespace.c 2>/dev/null | head -n 12 | tee -a reports/manual-hook-gap.txt || true
+            done
+            echo '===== KernelSU manual-hook source declarations =====' | tee -a reports/manual-hook-gap.txt
+            grep -R -n -E 'ksu_handle_(execveat_ksud|execveat_sucompat|setresuid|umount|sys_reboot)' kernel/KernelSU-Next/kernel --include='*.h' --include='*.c' 2>/dev/null | head -n 90 | tee -a reports/manual-hook-gap.txt || true
             echo 'Diagnostic only: KernelSU objects may still fail due to incomplete manual hooks; not a full link.' >> reports/NOT_FLASHABLE.txt
             echo 'Only reboot object tested; all other manual hooks remain unverified. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
             exit 1
