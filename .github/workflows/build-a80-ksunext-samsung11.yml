@@ -547,6 +547,8 @@ jobs:
           assert tail.count(guard) == 1, 'unexpected execveat error guard'
           call = '\n#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);\n#endif\n'
           tail = tail.replace(guard, guard + call, 1)
+          import os, stat
+          os.chmod(p, p.stat().st_mode | stat.S_IWUSR)
           p.write_text(src[:start] + tail)
           PY
           set +e
