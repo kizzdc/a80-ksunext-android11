@@ -323,6 +323,10 @@ jobs:
                 cp "kernel/$file" "reports/source-context/$file"
               fi
             done
+            echo '===== KernelSU manual hook API references =====' >> reports/manual-hook-assessment.txt
+            grep -R -nE 'ksu_handle_(execveat|faccessat|stat|read|sys_reboot|vfs_read|setuid)' kernel/KernelSU-Next/kernel --include='*.h' --include='*.c' | head -n 220 >> reports/manual-hook-assessment.txt || true
+            echo '===== Samsung syscall signatures =====' >> reports/manual-hook-assessment.txt
+            grep -nE 'SYSCALL_DEFINE[0-6]\\((execve|execveat|faccessat|read|newfstatat|reboot)|do_execveat_common|do_faccessat' kernel/fs/{exec,open,read_write,stat}.c kernel/kernel/reboot.c >> reports/manual-hook-assessment.txt || true
             echo 'NO BUILD: missing verified KernelSU manual hooks. NOT FLASHABLE.' >> reports/manual-hook-assessment.txt
             exit 1
           fi
