@@ -434,6 +434,19 @@ jobs:
                 tail -n 35 "reports/${target//\//-}.log" >> reports/manual-hook-object-audit.txt
               fi
             done
+            echo '===== KernelSU Next legacy object compilation audit =====' | tee reports/ksu-object-audit.txt
+            set +e
+            make -C kernel O="$GITHUB_WORKSPACE/out" \
+              CC=clang-14 LD=ld.lld-14 HOSTCC=gcc \
+              AR=llvm-ar-14 NM=llvm-nm-14 \
+              CLANG_TRIPLE=aarch64-linux-gnu- \
+              KCFLAGS='-Wno-error=unused-but-set-variable -gdwarf-4' \
+              -j2 drivers/kernelsu/ > reports/ksu-object-build.log 2>&1
+            ksu_rc=$?
+            set -e
+            echo "KernelSU Next objects compile exit code: $ksu_rc" | tee -a reports/ksu-object-audit.txt
+            tail -n 100 reports/ksu-object-build.log | tee -a reports/ksu-object-audit.txt
+            echo 'Diagnostic only: KernelSU objects may still fail due to incomplete manual hooks; not a full link.' >> reports/NOT_FLASHABLE.txt
             echo 'Only reboot object tested; all other manual hooks remain unverified. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
             exit 1
           fi
