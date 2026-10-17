@@ -467,6 +467,23 @@ jobs:
             echo '===== Confirm generated SELinux headers =====' >> reports/ksu-symbol-audit.txt
             test -s out/security/selinux/flask.h && echo 'flask.h exists' >> reports/ksu-symbol-audit.txt
             test -s out/security/selinux/av_permissions.h && echo 'av_permissions.h exists' >> reports/ksu-symbol-audit.txt
+            echo '===== Cross-check undefined KernelSU symbols against definitions =====' | tee reports/ksu-resolution-audit.txt
+            llvm-nm-14 --defined-only out/drivers/kernelsu/built-in.o 2>/dev/null | grep -E 'ksu_handle_|ksu_|supercall' > reports/ksu-defined-symbols.txt || true
+            llvm-nm-14 -u out/drivers/kernelsu/built-in.o 2>/dev/null | awk '{print $NF}' | grep -E '^ksu_' | sort -u > reports/ksu-undefined-symbols.txt || true
+            while IFS= read -r symbol; do
+              if grep -Eq "[[:space:]][TWDBR][[:space:]]$symbol$" reports/ksu-defined-symbols.txt; then
+                echo "INTERNAL $symbol" >> reports/ksu-resolution-audit.txt
+              else
+                echo "EXTERNAL_OR_UNRESOLVED $symbol" >> reports/ksu-resolution-audit.txt
+              fi
+            done < reports/ksu-undefined-symbols.txt
+            echo '===== Samsung hook site function and nearby source =====' >> reports/ksu-resolution-audit.txt
+            for spec in 'fs/exec.c:do_execveat_common' 'fs/open.c:do_faccessat' 'fs/read_write.c:SYSCALL_DEFINE3(read' 'fs/stat.c:vfs_statx' 'fs/namespace.c:SYSCALL_DEFINE2(umount'; do
+              file="${spec%%:*}"
+              symbol="${spec#*:}"
+              echo "--- $file $symbol ---" >> reports/ksu-resolution-audit.txt
+              grep -n -F -A 12 -B 4 "$symbol" "kernel/$file" | head -n 95 >> reports/ksu-resolution-audit.txt || true
+            done
             echo 'Diagnostic only: KernelSU objects may still fail due to incomplete manual hooks; not a full link.' >> reports/NOT_FLASHABLE.txt
             echo 'Only reboot object tested; all other manual hooks remain unverified. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
             exit 1
