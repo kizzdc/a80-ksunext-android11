@@ -506,6 +506,15 @@ jobs:
             done
             echo '===== KernelSU manual-hook source declarations =====' | tee -a reports/manual-hook-gap.txt
             grep -R -n -E 'ksu_handle_(execveat_ksud|execveat_sucompat|setresuid|umount|sys_reboot)' kernel/KernelSU-Next/kernel --include='*.h' --include='*.c' 2>/dev/null | head -n 90 | tee -a reports/manual-hook-gap.txt || true
+            echo '===== Effective KernelSU hook configuration =====' | tee reports/hook-mode-audit.txt
+            grep -E '^CONFIG_(KSU|KSU_MANUAL_HOOK|KSU_KPROBES_HOOK|KSU_SYSCALL_TABLE_HOOK|SECURITY_SELINUX|SECURITY)=' out/.config | tee -a reports/hook-mode-audit.txt || true
+            echo '===== Compiled KernelSU hook-related symbols =====' | tee -a reports/hook-mode-audit.txt
+            llvm-nm-14 --defined-only out/drivers/kernelsu/built-in.o 2>/dev/null | grep -E 'ksu_handle_execveat|ksu_handle_setresuid|ksu_handle_umount|ksu_handle_sys_reboot|ksu_hook_init|ksu_lsm_hook_init' | tee -a reports/hook-mode-audit.txt || true
+            echo '===== Samsung kernel exec/setuid syscall entry points =====' | tee -a reports/hook-mode-audit.txt
+            for file in kernel/fs/exec.c kernel/kernel/sys.c kernel/fs/namespace.c; do
+              echo "--- $file ---" | tee -a reports/hook-mode-audit.txt
+              grep -n -E 'do_execveat_common|SYSCALL_DEFINE[0-9]\((execve|execveat|setresuid|umount)|commit_creds|set_current_cred' "$file" | head -n 65 | tee -a reports/hook-mode-audit.txt || true
+            done
             echo 'Diagnostic only: KernelSU objects may still fail due to incomplete manual hooks; not a full link.' >> reports/NOT_FLASHABLE.txt
             echo 'Only reboot object tested; all other manual hooks remain unverified. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
             exit 1
