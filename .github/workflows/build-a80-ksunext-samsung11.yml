@@ -587,6 +587,18 @@ jobs:
           echo "Temporary setresuid hook compile exit code: $setuid_rc" | tee -a reports/setresuid-hook-compile.txt
           tail -n 45 reports/setresuid-hook-compile-build.log | tee -a reports/setresuid-hook-compile.txt
           echo 'Setresuid hook experimental only, no full kernel link or boot validation. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
+          echo '===== Verify setresuid symbol reference =====' | tee reports/setresuid-hook-symbol-check.txt
+          llvm-nm-14 -u out/kernel/sys.o | grep 'ksu_handle_setresuid' | tee -a reports/setresuid-hook-symbol-check.txt || true
+          echo '===== Try complete kernel compilation and linking with temporary hooks =====' | tee reports/full-kernel-attempt.txt
+          set +e
+          timeout 1500 make -C kernel O="$GITHUB_WORKSPACE/out" -j"$(nproc)" CC=clang-14 LD=ld.lld-14 HOSTCC=gcc AR=llvm-ar-14 NM=llvm-nm-14 CLANG_TRIPLE=aarch64-linux-gnu- Image > reports/full-kernel-build.log 2>&1
+          full_rc=$?
+          set -e
+          echo "Full kernel Image build exit code: $full_rc" | tee -a reports/full-kernel-attempt.txt
+          echo '===== Full kernel build last 100 lines =====' | tee -a reports/full-kernel-attempt.txt
+          tail -n 100 reports/full-kernel-build.log | tee -a reports/full-kernel-attempt.txt
+          echo 'Full kernel test is experimental; remaining hooks and boot are unverified. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
+
 
             echo 'Diagnostic only: KernelSU objects may still fail due to incomplete manual hooks; not a full link.' >> reports/NOT_FLASHABLE.txt
             echo 'Only reboot object tested; all other manual hooks remain unverified. NOT FLASHABLE.' >> reports/NOT_FLASHABLE.txt
